@@ -1,0 +1,297 @@
+/* Default page styling */
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    color: #333;
+    text-align: center;
+}
+/* Styling for the feedback landing page paragraph */
+
+.container {
+    -webkit-text-fill-color: white;
+    border-style: solid;
+    border-color: whitesmoke;
+    background: linear-gradient(to right, #0d0b87, #fa752e);
+    width: 80%;
+    margin: 50px auto;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+p {
+    font-size: 1.1em;
+    line-height: 1.6em;
+    color: #444;
+    margin-bottom: 20px;
+}
+
+p strong {
+    font-size: 1.5em;
+    color: #2b67c9; /* Eye-catching color for the heading */
+}
+
+p:last-child {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #2b67c9;
+}
+
+/* Input styling */
+input[type="text"], input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    box-sizing: border-box;
+    font-size: 1.1em;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #fff; /* Ensures the background is white */
+    color: #333; /* Text color inside the input field */
+}
+
+/* Ensure the placeholder text is visible */
+input::placeholder {
+    color: #999; /* Lighter color for placeholder */
+}
+
+button {
+    background-color: #2b67c9;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    font-size: 1.1em;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #1e4a8f;
+}
+
+/* Container styling for the button section */
+.buttins {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    width: 80%;
+    margin: 50px auto;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    background-color: linear-gradient(red,blue,red); /* Light background for better readability */
+    border: 1px solid purple;
+}
+
+/* Styling for each button block */
+.buttins a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    width: 45%; /* Two buttons per line */
+    margin-bottom: 20px;
+    padding: 20px;
+    text-decoration: none;
+    background-color: #6a5acd;
+    color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s, background-color 0.3s;
+    text-align: center;
+}
+
+.buttins a:hover {
+    background-color: #483d8b; /* Darker on hover */
+    transform: translateY(-5px); /* Slight lift on hover */
+}
+
+.buttins a img {
+    width: 250px; /* Set a fixed size for the icons */
+    height: 250px;
+    margin-bottom: 10px;
+}
+
+.buttins a span {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+/* Neon Text Effect */
+.heading p {
+    font-size: 2em;
+    text-align: center;
+    color: #fff;
+    font-family: 'Arial', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    animation: neon 1.5s infinite alternate;
+    position: relative;
+    margin: 20px 0;
+}
+
+.heading p:nth-child(2) {
+    font-size: 2.5em;
+    margin-bottom: 30px;
+}
+
+/* Neon glow animation */
+@keyframes neon {
+    from {
+        text-shadow: 0 0 10px #ff00ff, 0 0 20px #ff00ff, 0 0 30px #ff00ff, 
+                     0 0 20px #ff00ff, 0 0 50px #ff00ff, 0 0 60px #ff00ff, 
+                     0 0 30px #ff00ff;
+    }
+    to {
+        text-shadow: 0 0 20px #e53812, 0 0 30px #ed8d18, 0 0 40px #e83616, 
+                     0 0 50px #f3711b, 0 0 60px #f13a1e, 0 0 70px #ff00d4, 
+                     0 0 80px #00ffff;
+    }
+}
+
+.container p {
+    text-align: left;
+    margin-bottom: 15px;
+}
+
+.container p:first-child {
+    text-align: center;
+}
+
+.container p:last-child {
+    text-align: center;
+    font-style: italic;
+}
+
+/* Additional styles for responsiveness */
+@media (max-width: 768px) {
+    .container {
+        width: 95%;
+    }
+
+    p {
+        font-size: 1em;
+        line-height: 1.5em;
+    }
+
+    p strong {
+        font-size: 1.3em;
+    }
+}
+
+/* Navbar styling */
+nav {
+    background-color: #0072ff;
+    padding: 10px 0;
+    color: #fff;
+}
+
+nav ul {
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    text-align: center;
+}
+
+nav ul li {
+    display: inline;
+    margin-right: 20px;
+}
+
+nav ul li a {
+    color: #fff;
+    text-decoration: none;
+    font-size: 1.2em;
+}
+
+nav ul li a:hover {
+    text-decoration: underline;
+}
+
+/* Container for page content */
+.container {
+    padding: 20px;
+}
+
+/* Unique background gradients for each page */
+
+/* Home Page */
+.home-page {
+    background: linear-gradient(to right, #031482, #fa752e); /* Gradient from blue to orange */
+}
+
+/* Admin Login Page */
+.admin-page {
+    background: linear-gradient(to right, #ff512f, #dd2476); /* Gradient from red to pink */
+}
+
+/* Student Login Page */
+.student-page {
+    background: linear-gradient(to right, #36d1dc, #5b86e5); /* Gradient from light blue to violet */
+}
+
+/* Parent Login Page */
+.parent-page {
+    background: linear-gradient(to right, #00c6ff, #0072ff); /* Gradient from light blue to dark blue */
+}
+
+h1 {
+    color: #fff;
+    margin-top: 50px;
+    font-size: 2.5em;
+}
+
+a {
+    display: inline-block;
+    margin: 10px 0;
+    text-decoration: none;
+    color: #fff;
+    background-color: #0072ff;
+    padding: 10px 20px;
+    border-radius: 5px;
+    font-size: 1.2em;
+    transition: background-color 0.3s, transform 0.3s;
+}
+
+a:hover {
+    background-color: #005bb5;
+    transform: scale(1.05);
+}
+
+a:active {
+    background-color: #003d7a;
+}
+
+/* Form styling */
+form {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-top: 10px;
+}
+
+input[type="text"], input[type="password"], input[type="date"], textarea, select {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+}
+
+button {
+    margin-top: 10px;
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.flash {
+    color: red;
+}

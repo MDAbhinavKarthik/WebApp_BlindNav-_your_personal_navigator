@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Parent Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('index') }}">Home</a></li>
+            <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+            <li><a href="{{ url_for('student_login') }}">Student Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Parent Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Teacher Login</a></li>
+        </ul>
+    </nav>
+    <h1>Parent Login</h1>
+    <form method="post">
+        <label for="userid">UserID:</label>
+        <input type="text" id="userid" name="userid" required><br>
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required><br>
+        <button type="submit">Login</button>
+    </form>
+</body>
+</html>

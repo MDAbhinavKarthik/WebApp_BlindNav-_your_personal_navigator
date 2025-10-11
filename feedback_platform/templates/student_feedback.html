@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Student Feedback</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('index') }}">Home</a></li>
+            <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+            <li><a href="{{ url_for('student_login') }}">Student Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Parent Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Teacher Login</a></li>
+        </ul>
+    </nav>
+    <h1>Student Feedback</h1>
+    <form method="post">
+        {% if feedback_form %}
+            {% for question in feedback_form.questions %}
+                <label>{{ question }}</label>
+                <input type="range" name="{{ loop.index0 }}" min="0" max="{{ feedback_form.rating }}" required><br>
+            {% endfor %}
+            <button type="submit">Submit</button>
+        {% else %}
+            <p>No feedback form available.</p>
+        {% endif %}
+    </form>
+</body>
+</html>

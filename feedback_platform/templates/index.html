@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Feedback Platform</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="home-page">
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('index') }}">Home</a></li>
+            <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+            <li><a href="{{ url_for('student_login') }}">Student Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Parent Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Teacher Login</a></li>
+        </ul>
+    </nav>
+    <div class="heading">
+    <p>VIVEKANANDA INSTITUTE OF TECHNOLOGY</p>
+    <p>FEEDBACK PLATFORM</p>
+    </div>
+    <div class="container">
+        <p><strong>Your Feedback is the Key to Our Success!</strong></p>
+        <p>At the heart of every great educational experience is the collaboration between students, teachers, and parents. We believe that your insights, opinions, and suggestions are vital in shaping the future of our college. By taking the time to provide thoughtful and constructive feedback, you are helping us identify what works well, what needs improvement, and how we can create a more enriching environment for everyone.</p>
+        <p>Whether you’re a student sharing your learning journey, a teacher reflecting on classroom interactions, or a parent providing valuable input on your child’s progress, your voice has the power to inspire meaningful change. This is your opportunity to help us refine teaching strategies, enhance student support systems, and improve overall communication. Every comment, every rating, and every suggestion is an essential part of the continuous improvement process.</p>
+        <p>Together, we can create a learning environment that nurtures growth, innovation, and success. Please take a few moments to share your feedback—it’s more than just a form, it’s your chance to make a real difference!</p>
+    </div>
+    <div class="buttins">
+        <a href="{{ url_for('admin_login') }}">
+            <img src="{{ url_for('static', filename='images/admin_icon.png') }}" alt="Admin Icon">
+            <span>Admin Login</span>
+        </a>
+        <a href="{{ url_for('student_login') }}">
+            <img src="{{ url_for('static', filename='images/student_icon.png') }}" alt="Student Icon">
+            <span>Student Login</span>
+        </a>
+        <a href="{{ url_for('parent_login') }}">
+            <img src="{{ url_for('static', filename='images/parent_icon.png') }}" alt="Parent Icon">
+            <span>Parent Login</span>
+        </a>
+        <a href="{{ url_for('parent_login') }}">
+            <img src="{{ url_for('static', filename='images/teacher_icon.png') }}" alt="Teacher Icon">
+            <span>Teacher Login</span>
+        </a>
+    </div>
+      
+</body>
+</html>

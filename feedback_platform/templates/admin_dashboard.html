@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('index') }}">Home</a></li>
+            <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+            <li><a href="{{ url_for('student_login') }}">Student Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Parent Login</a></li>
+            <li><a href="{{ url_for('parent_login') }}">Teacher Login</a></li>
+        </ul>
+    </nav>
+    <div class="container">
+        {% block content %}
+    <h1>Admin Dashboard</h1>
+    <form method="post">
+        <h2>Create Feedback Form</h2>
+        <label for="semester">Semester:</label>
+        <input type="text" id="semester" name="semester" required><br>
+        <label for="rating">Rating Options:</label>
+        <select id="rating" name="rating">
+            <option value="10">10</option>
+            <option value="5">5</option>
+        </select><br>
+        <label for="questions">Questions:</label>
+        <textarea id="questions" name="questions" rows="10" cols="30" placeholder="Enter questions here (max 15)"></textarea><br>
+        <label for="feedback_deadline">Feedback Deadline:</label>
+        <input type="date" id="feedback_deadline" name="feedback_deadline" required><br>
+        <button type="submit">Submit</button>
+    </form>
+
+    <h2>Create User</h2>
+    <form method="post">
+        <label for="create_username">Username:</label>
+        <input type="text" id="create_username" name="create_username" required><br>
+        <label for="create_password">Password:</label>
+        <input type="password" id="create_password" name="create_password" required><br>
+        <label for="create_role">Role:</label>
+        <select id="create_role" name="create_role">
+            <option value="students">Student</option>
+            <option value="teachers">Teacher</option>
+            <option value="parents">Parent</option>
+        </select><br>
+        <button type="submit" name="create_user">Create User</button>
+    </form>
+
+    <h2>Current Feedback Form</h2>
+    {% if feedback_data %}
+        <p>Semester: {{ feedback_data.semester }}</p>
+        <p>Rating Options: {{ feedback_data.rating }}</p>
+        <p>Deadline: {{ feedback_data.deadline }}</p>
+        <ul>
+            {% for question in feedback_data.questions %}
+                <li>{{ question }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No feedback form available.</p>
+    {% endif %}
+    
+    <h2>User List</h2>
+    <h3>Students</h3>
+    <ul>
+        {% for user in users['students'] %}
+            <li>{{ user.username }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Teachers</h3>
+    <ul>
+        {% for user in users['teachers'] %}
+            <li>{{ user.username }}</li>
+        {% endfor %}
+    </ul>
+    <h3>Parents</h3>
+    <ul>
+        {% for user in users['parents'] %}
+            <li>{{ user.username }}</li>
+        {% endfor %}
+    </ul>
+    <!-- Content of each page will be inserted here -->
+    {% endblock %}
+</div>
+</body>
+</html>
