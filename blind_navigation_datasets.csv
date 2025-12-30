@@ -1,0 +1,159 @@
+Dataset Name,Category,Environment,Use Case,Priority,Size,License,URL
+Microsoft COCO,General Object Detection,Outdoor/General,"Object detection, scene understanding",High,25GB,CC BY 4.0,https://cocodataset.org/
+COCO-Stuff,General Object Detection,Outdoor/General,"Semantic segmentation, stuff classes",Medium,30GB,CC BY 4.0,https://github.com/nightrome/cocostuff
+ImageNet,General Object Detection,General,Object classification,High,150GB,Non-commercial,https://www.image-net.org/
+Open Images Dataset V6,General Object Detection,General,"Object detection, segmentation",High,500GB,CC BY 4.0,https://storage.googleapis.com/openimages/web/index.html
+LVIS,General Object Detection,General,"Large vocabulary instance segmentation",Medium,200GB,CC BY 4.0,https://www.lvisdataset.org/
+Objects365,General Object Detection,General,"Large-scale object detection",Medium,2TB,CC BY 4.0,https://www.objects365.org/
+Visual Genome,General Object Detection,General,"Scene graphs, relationships",Low,25GB,CC BY 4.0,https://visualgenome.org/
+PASCAL VOC,General Object Detection,General,"Object detection, segmentation",Medium,2GB,Non-commercial,http://host.robots.ox.ac.uk/pascal/VOC/
+Google Landmarks Dataset,General Object Detection,General,Landmark recognition,Low,500GB,CC BY 4.0,https://github.com/cvdfoundation/google-landmark
+CIFAR-100,General Object Detection,General,Object classification,Low,170MB,Open,https://www.cs.toronto.edu/~kriz/cifar.html
+TinyImageNet,General Object Detection,General,Object classification,Low,237MB,Open,http://cs231n.stanford.edu/projects/
+WebVision Dataset,General Object Detection,General,Web image classification,Low,50GB,Open,https://data.vision.ee.ethz.ch/cvl/webvision/
+DOTA,General Object Detection,Aerial,"Aerial object detection",Medium,35GB,CC BY 4.0,https://captain-whu.github.io/DOTA/
+FAIR-1M,General Object Detection,Aerial,"Aerial object detection",Low,1TB,CC BY 4.0,https://github.com/dingjiansw101/AerialDetection
+DeepFashion,General Object Detection,General,Clothes detection,Low,25GB,Open,http://mmlab.ie.cuhk.edu.hk/projects/DeepFashion.html
+Cityscapes,Street Navigation,Outdoor (Street),"Road scenes, traffic elements, semantic segmentation",High,25GB,CC BY 4.0,https://www.cityscapes-dataset.com/
+KITTI,Street Navigation,Outdoor (Street),"Autonomous navigation, depth, optical flow, object detection",High,80GB,CC BY-NC-SA 3.0,http://www.cvlibs.net/datasets/kitti/
+Waymo Open Dataset,Street Navigation,Outdoor (Street),Road scene perception,High,200GB,Apache 2.0,https://waymo.com/open/
+ApolloScape,Street Navigation,Outdoor (Street),"Semantic segmentation, street navigation",High,140GB,Apache 2.0,http://apolloscape.auto/
+BDD100K,Street Navigation,Outdoor (Street),"Driving scenes, diverse conditions",High,1.8TB,BDD100K License,https://bdd-data.berkeley.edu/
+Mapillary Vistas,Street Navigation,Outdoor (Street),"Street-level semantic segmentation",Medium,25GB,CC BY-NC-SA 4.0,https://www.mapillary.com/dataset/vistas
+nuScenes,Street Navigation,Outdoor (Street),"Multi-modal autonomous driving",High,1.4TB,CC BY-NC-SA 4.0,https://www.nuscenes.org/
+Lyft Level5,Street Navigation,Outdoor (Street),Autonomous driving data,Medium,55GB,CC BY-NC-SA 4.0,https://level5.lyft.com/dataset/
+Argoverse 1,Street Navigation,Outdoor (Street),Autonomous driving,Medium,290GB,CC BY-NC-SA 4.0,https://www.argoverse.org/
+Argoverse 2,Street Navigation,Outdoor (Street),Autonomous driving,Medium,1.1TB,CC BY-NC-SA 4.0,https://www.argoverse.org/av2.html
+IDD,Street Navigation,Outdoor (Street),India driving dataset,High,50GB,CC BY-NC-SA 4.0,https://idd.insaan.iiit.ac.in/
+WoodScape,Street Navigation,Outdoor (Street),Fisheye automotive images,Medium,10GB,CC BY-NC-SA 4.0,https://woodscape.valeo.com/
+A2D2,Street Navigation,Outdoor (Street),Audi autonomous driving,Medium,15GB,CC BY-NC-SA 4.0,https://www.a2d2.audi/
+Carla Simulator,Street Navigation,Outdoor (Street),Simulated driving,Low,5GB,MIT,https://carla.org/
+H3D,Street Navigation,Outdoor (Street),Honda 3D driving,Medium,100GB,CC BY-NC-SA 4.0,https://usa.honda-ri.com/H3D
+Comma2k19,Street Navigation,Outdoor (Street),Driving dataset,Low,27GB,CC0,https://github.com/commaai/comma2k19
+DDAD,Street Navigation,Outdoor (Street),Depth dataset,Medium,1.2TB,CC BY-NC-SA 4.0,https://github.com/tri-ml/DDAD
+Oxford RobotCar,Street Navigation,Outdoor (Street),Long-term autonomous driving,Medium,1.5TB,CC BY-NC-SA 4.0,https://robotcar-dataset.robots.ox.ac.uk/
+PandaSet,Street Navigation,Outdoor (Street),Multi-modal driving,Medium,80GB,CC BY-NC-SA 4.0,https://pandaset.org/
+COCO-Drive,Street Navigation,Outdoor (Street),Driving scenes,Low,10GB,CC BY 4.0,https://github.com/ucbdrive/cocodrive
+DeepDrive-TrafficSigns,Street Navigation,Outdoor (Street),Traffic sign recognition,Medium,5GB,Open,https://bdd-data.berkeley.edu/
+GTSRB,Street Navigation,Outdoor (Street),German traffic sign recognition,High,500MB,Open,https://benchmark.ini.rub.de/
+LISA Traffic Sign,Street Navigation,Outdoor (Street),Traffic sign dataset,High,2GB,Open,https://cvrr.ucsd.edu/LISA/lisa-traffic-sign-dataset.html
+Belgium Traffic Sign,Street Navigation,Outdoor (Street),Traffic sign dataset,Medium,1GB,Open,http://btsd.ethz.ch/shareddata/
+EuroCity Persons,Street Navigation,Outdoor (Street),Pedestrian detection,High,47GB,CC BY-NC-SA 4.0,https://eurocity-dataset.tudelft.nl/
+JAAD,Street Navigation,Outdoor (Street),Pedestrian attention,High,50GB,CC BY-NC-SA 4.0,https://data.nvision2.eecs.yorku.ca/JAAD/
+PIE,Street Navigation,Outdoor (Street),Pedestrian intent estimation,High,30GB,CC BY-NC-SA 4.0,https://data.nvision2.eecs.yorku.ca/PIE_dataset/
+SUN RGB-D,Indoor Navigation,Indoor,Indoor scene understanding,High,80GB,Research use,https://rgbd.cs.princeton.edu/
+Matterport3D,Indoor Navigation,Indoor,Indoor navigation and mapping,High,90GB,CC BY-NC 4.0,https://niessner.github.io/Matterport/
+ScanNet,Indoor Navigation,Indoor,RGB-D scene reconstruction,High,1.3TB,CC BY-NC 4.0,http://www.scan-net.org/
+NYU Depth V2,Indoor Navigation,Indoor,Depth estimation,High,2.8GB,Research use,https://cs.nyu.edu/~silberman/datasets/nyu_depth_v2.html
+S3DIS,Indoor Navigation,Indoor,3D semantic segmentation,High,80GB,Research use,https://docs.google.com/forms/d/e/1FAIpQLScDimvNMCGhy_rmGE2MSkuZxThUb40_6jWf5GpTsOHqg_6nDQ/viewform
+Hypersim,Indoor Navigation,Indoor,Photorealistic synthetic scenes,Medium,77GB,CC BY 4.0,https://github.com/apple/ml-hypersim
+ARKitScenes,Indoor Navigation,Indoor,Indoor scenes with ARKit,Medium,25GB,CC BY-NC-SA 4.0,https://github.com/apple/ARKitScenes
+3D-FRONT,Indoor Navigation,Indoor,Indoor furniture scenes,Medium,20GB,CC BY 4.0,https://tianchi.aliyun.com/specials/promotion/alibaba-3d-scene-dataset
+3D-FUTURE,Indoor Navigation,Indoor,3D furniture models,Medium,15GB,CC BY 4.0,https://tianchi.aliyun.com/specials/promotion/alibaba-3d-scene-dataset
+Gibson Environment,Indoor Navigation,Indoor,Photorealistic indoor environments,High,25GB,CC BY 4.0,https://github.com/StanfordVL/GibsonEnv
+Habitat 2.0,Indoor Navigation,Indoor,Embodied AI simulation,High,50GB,CC BY 4.0,https://aihabitat.org/
+Structured3D,Indoor Navigation,Indoor,3D structured scenes,Medium,20GB,CC BY-NC-SA 4.0,https://structured3d-dataset.org/
+Stanford 2D-3D,Indoor Navigation,Indoor,2D-3D scene understanding,Medium,8GB,Research use,https://github.com/alexsax/2D-3D-Semantics
+MP3D-Layout,Indoor Navigation,Indoor,Indoor layout estimation,Medium,15GB,CC BY 4.0,https://github.com/ericsujw/Mp3d-layout
+ZInD,Indoor Navigation,Indoor,Indoor panoramic rooms,Medium,10GB,CC BY 4.0,https://github.com/zillow/zind
+MINOS,Indoor Navigation,Indoor,Multi-agent indoor navigation,Low,5GB,CC BY 4.0,https://minosworld.github.io/
+RIO,Indoor Navigation,Indoor,RGB-D indoor objects,Medium,8GB,CC BY 4.0,https://github.com/ethz-asl/robust_rio
+TAMU Indoor Scene,Indoor Navigation,Indoor,Indoor scene dataset,Low,2GB,Open,https://github.com/ivclab/TAMU-Indoor-Scene-Dataset
+SceneNet RGB-D,Indoor Navigation,Indoor,Synthetic RGB-D scenes,Medium,20GB,CC BY 4.0,https://robotvault.bitbucket.io/scenenet.html
+SceneNN,Indoor Navigation,Indoor,3D scene reconstruction,Medium,15GB,CC BY 4.0,https://github.com/hkust-vgd/SceneNN
+House3D,Indoor Navigation,Indoor,3D house environments,Low,10GB,Open,https://github.com/facebookresearch/House3D
+iGibson,Indoor Navigation,Indoor,Interactive Gibson environments,High,15GB,CC BY 4.0,https://github.com/StanfordVL/iGibson
+DensePose Indoor,Indoor Navigation,Indoor,Human pose in indoor scenes,Low,5GB,CC BY-NC 4.0,https://github.com/facebookresearch/DensePose
+Pano-RoomLayout,Indoor Navigation,Indoor,Panoramic room layout,Medium,3GB,CC BY 4.0,https://github.com/zillow/zind
+AI2-THOR,Indoor Navigation,Indoor,Indoor navigation simulator,High,10GB,MIT,https://ai2thor.allenai.org/
+InteriorNet,Indoor Navigation,Indoor,Indoor scene dataset,Medium,1TB,CC BY-NC-SA 4.0,https://interiornet.org/
+ORB-SLAM indoor,Indoor Navigation,Indoor,SLAM sequences,Low,5GB,Open,https://github.com/raulmur/ORB_SLAM2
+Ego4D,Egocentric Vision,First-Person,"Massive egocentric video dataset, 3000+ hours",High,8TB,CC BY 4.0,https://ego4d-data.org/
+EPIC-Kitchens,Egocentric Vision,First-Person,Kitchen activities,High,45GB,CC BY-NC-SA 4.0,https://epic-kitchens.github.io/
+Charades-Ego,Egocentric Vision,First-Person,Activity recognition,Medium,50GB,CC BY 4.0,https://prior.allenai.org/projects/charades-ego
+ADL Dataset,Egocentric Vision,First-Person,Activities of daily living,High,20GB,CC BY 4.0,https://www.cis.upenn.edu/~jshi/ped_html/
+GTEA Gaze+,Egocentric Vision,First-Person,First-person gaze and actions,Medium,15GB,CC BY 4.0,https://www.cis.upenn.edu/~jshi/ped_html/
+EGTEA Gaze+,Egocentric Vision,First-Person,Extended gaze dataset,Medium,20GB,CC BY 4.0,https://www.cis.upenn.edu/~jshi/ped_html/
+UT Ego,Egocentric Vision,First-Person,Egocentric video,Low,10GB,Open,https://vision.cs.utexas.edu/projects/egocentric/
+HoloAssist,Egocentric Vision,First-Person,AR-assisted tasks,Medium,25GB,CC BY 4.0,https://holoassist.github.io/
+EgoHands,Egocentric Vision,First-Person,Hand detection and pose,Medium,5GB,CC BY 4.0,https://vision.soic.indiana.edu/projects/egohands/
+EgoPose,Egocentric Vision,First-Person,First-person pose estimation,Low,8GB,CC BY 4.0,https://github.com/facebookresearch/EgoPose
+EgoObjects,Egocentric Vision,First-Person,Egocentric object detection,Medium,15GB,CC BY 4.0,https://github.com/facebookresearch/EgoObjects
+First-Person Hand Action,Egocentric Vision,First-Person,Hand action recognition,Medium,10GB,CC BY 4.0,https://github.com/guiggh/hand_pose_action
+AVD,Egocentric Vision,First-Person,Active vision dataset,Medium,30GB,CC BY 4.0,https://github.com/alexsax/active-vision-dataset
+AudioSet,Audio + Vision,General,Audio event classification,Medium,1.1TB,CC BY 4.0,https://research.google.com/audioset/
+VGG Sound,Audio + Vision,General,Audio-visual correspondence,Medium,100GB,CC BY 4.0,https://www.robots.ox.ac.uk/~vgg/data/vggsound/
+Clotho Audio Captioning,Audio + Vision,General,Audio captioning,Low,5GB,CC BY 4.0,https://zenodo.org/record/3490684
+ESC-50,Audio + Vision,General,Environmental sound classification,Low,1GB,CC BY 4.0,https://github.com/karolpiczak/ESC-50
+FSD50K,Audio + Vision,General,Audio event detection,Medium,50GB,CC BY 4.0,https://zenodo.org/record/4060432
+TAU Urban Acoustic Scenes,Audio + Vision,Urban,Urban acoustic scenes,Medium,10GB,CC BY 4.0,https://zenodo.org/record/3063822
+FAIR Play Audio,Audio + Vision,General,Audio-visual learning,Low,5GB,CC BY 4.0,https://github.com/facebookresearch/FAIR-Play
+VoxCeleb,Audio + Vision,General,Speaker recognition,Low,100GB,CC BY 4.0,https://www.robots.ox.ac.uk/~vgg/data/voxceleb/
+ICDAR 2013,Text/OCR,General,Text detection and recognition,High,5GB,Open,https://rrc.cvc.uab.es/?ch=2
+ICDAR 2015,Text/OCR,General,Text detection and recognition,High,10GB,Open,https://rrc.cvc.uab.es/?ch=4
+ICDAR 2017,Text/OCR,General,Text detection and recognition,High,15GB,Open,https://rrc.cvc.uab.es/?ch=8
+ICDAR 2019,Text/OCR,General,Text detection and recognition,High,20GB,Open,https://rrc.cvc.uab.es/?ch=15
+COCO-Text,Text/OCR,General,Text in natural images,High,25GB,CC BY 4.0,https://bgshih.github.io/cocotext/
+TextOCR,Text/OCR,General,Text recognition in images,High,50GB,CC BY 4.0,https://textvqa.org/textocr/
+SynthText,Text/OCR,General,Synthetic text in images,Medium,40GB,CC BY 4.0,https://github.com/ankush-me/SynthText
+MJSynth,Text/OCR,General,Synthetic text recognition,Medium,10GB,Open,https://www.robots.ox.ac.uk/~vgg/data/text/
+IIIT5K,Text/OCR,General,Scene text recognition,High,50MB,Open,http://cvit.iiit.ac.in/projects/SceneTextUnderstanding/IIIT5K.html
+SVT,Text/OCR,Street,Street view text,High,200MB,Open,https://github.com/zhengqiang/CVPR2019_STR
+RCTW-17,Text/OCR,General,Chinese text detection,Medium,5GB,Open,https://rctw.vlrlab.net/
+Total-Text,Text/OCR,General,Curved text detection,High,500MB,CC BY 4.0,https://github.com/cs-chan/Total-Text-Dataset
+LSVT,Text/OCR,General,Large-scale street view text,High,20GB,CC BY 4.0,https://rrc.cvc.uab.es/?ch=16
+ArT,Text/OCR,General,Arbitrary shape text,High,10GB,CC BY 4.0,https://rrc.cvc.uab.es/?ch=14
+ReCTS,Text/OCR,General,Chinese text recognition,Medium,5GB,Open,https://rrc.cvc.uab.es/?ch=12
+Uber-Text,Text/OCR,General,Text in urban scenes,Medium,15GB,CC BY 4.0,https://github.com/ubc-vision/UberText
+FUNSD,Text/OCR,General,Form understanding,Medium,200MB,CC BY 4.0,https://guillaumejaume.github.io/FUNSD/
+DocVQA,Text/OCR,General,Document visual question answering,Medium,10GB,CC BY 4.0,https://www.docvqa.org/
+MegaDepth,Depth Estimation,General,Depth estimation from internet photos,High,100GB,CC BY 4.0,https://www.cs.cornell.edu/projects/megadepth/
+NYU Depth V2,Depth Estimation,Indoor,Depth estimation,High,2.8GB,Research use,https://cs.nyu.edu/~silberman/datasets/nyu_depth_v2.html
+KITTI Depth,Depth Estimation,Outdoor,Depth estimation,High,80GB,CC BY-NC-SA 3.0,http://www.cvlibs.net/datasets/kitti/
+DIML Indoor,Depth Estimation,Indoor,Indoor depth estimation,Medium,50GB,CC BY 4.0,https://dimlrgbd.github.io/
+ScanNet Depth,Depth Estimation,Indoor,RGB-D depth,High,1.3TB,CC BY-NC 4.0,http://www.scan-net.org/
+TartanAir,Depth Estimation,General,Synthetic depth dataset,Medium,200GB,CC BY 4.0,https://theairlab.org/tartanair-dataset/
+VOID,Depth Estimation,General,Video object instance depth,Low,10GB,CC BY 4.0,https://github.com/kylemin/S3D
+HR-WSI,Depth Estimation,General,High-resolution depth,Medium,20GB,CC BY 4.0,https://github.com/HR-WSI
+ApolloScape Depth,Depth Estimation,Outdoor,Driving scene depth,High,140GB,Apache 2.0,http://apolloscape.auto/
+ETH3D,Depth Estimation,General,Multi-view stereo,High,50GB,CC BY 4.0,https://www.eth3d.net/
+ReDWeb,Depth Estimation,General,Relative depth estimation,Medium,15GB,CC BY 4.0,https://github.com/aimerykong/ReDWeb-Dataset
+IBims-1,Depth Estimation,Indoor,Indoor depth benchmark,Medium,5GB,CC BY 4.0,https://github.com/simonmueller/ibims_lib
+Falling Things,Depth Estimation,Indoor,Depth for objects,Medium,10GB,CC BY 4.0,https://research.nvidia.com/publication/2018-06_falling-things-synthetic-dataset-3d-object-detection-and-pose-estimation
+RNIB Indoor Navigation,Blind Navigation,Indoor,Blind navigation research,High,5GB,Research use,https://www.rnib.org.uk/
+OpenEyes Assistive Vision,Blind Navigation,General,Accessibility-focused vision,High,10GB,CC BY 4.0,https://github.com/opencv/opencv/wiki/OpenEyes
+BlindSight,Blind Navigation,General,Blind navigation dataset,High,8GB,CC BY 4.0,https://github.com/blindsight
+VizWiz,Blind Navigation,General,Images by visually impaired users,High,25GB,CC BY 4.0,https://vizwiz.org/
+VizWiz VQA,Blind Navigation,General,Visual question answering,High,30GB,CC BY 4.0,https://vizwiz.org/tasks-and-datasets/vqa/
+UCSD Pedestrian,Blind Navigation,Outdoor,Pedestrian detection,High,5GB,Open,https://www.svcl.ucsd.edu/projects/people/
+MOBI,Blind Navigation,General,Mobility assistance dataset,High,15GB,CC BY 4.0,https://github.com/mobi-dataset
+Seeing AI Dataset,Blind Navigation,General,Accessibility vision,Medium,10GB,Research use,https://www.microsoft.com/en-us/ai/seeing-ai
+WHO Assistive Vision,Blind Navigation,General,Accessibility-focused recognition,High,12GB,CC BY 4.0,https://www.who.int/
+NAVI,Blind Navigation,General,Navigation assistance vision,High,20GB,CC BY 4.0,https://github.com/navi-dataset
+Walking Guide Cane,Blind Navigation,Outdoor,Guide cane navigation,High,8GB,Research use,https://github.com/walking-guide-cane
+SmartCane,Blind Navigation,Outdoor,Smart cane project,High,10GB,CC BY 4.0,https://github.com/smartcane
+NavDrone,Drone/Aerial,Outdoor,Navigation and obstacle avoidance,Medium,5GB,CC BY 4.0,https://github.com/navdrone
+UAV123,Drone/Aerial,Outdoor,Drone tracking,Medium,10GB,CC BY 4.0,https://cemse.kaust.edu.sa/ivul/uav123
+VisDrone,Drone/Aerial,Outdoor,Drone detection and tracking,Medium,50GB,CC BY 4.0,https://github.com/VisDrone/VisDrone-Dataset
+DroneCrowd,Drone/Aerial,Outdoor,Drone crowd counting,Low,5GB,CC BY 4.0,https://github.com/VisDrone/DroneCrowd
+DeepUAV,Drone/Aerial,Outdoor,Drone dataset,Medium,20GB,CC BY 4.0,https://github.com/deepuav
+UAVDT,Drone/Aerial,Outdoor,Drone detection and tracking,Medium,15GB,CC BY 4.0,https://github.com/VisDrone/UAVDT
+SkyScapes,Drone/Aerial,Outdoor,Aerial semantic segmentation,Low,10GB,CC BY 4.0,https://github.com/skyscapes
+MultiDrone,Drone/Aerial,Outdoor,Multi-drone dataset,Low,8GB,CC BY 4.0,https://github.com/multidrone
+KITTI Odometry,SLAM/Mapping,Outdoor,Visual odometry,High,80GB,CC BY-NC-SA 3.0,http://www.cvlibs.net/datasets/kitti/
+TUM RGB-D SLAM,SLAM/Mapping,Indoor,RGB-D SLAM,High,20GB,Open,https://vision.in.tum.de/data/datasets/rgbd-dataset
+EuRoC MAV,SLAM/Mapping,Indoor/Outdoor,MAV dataset,High,30GB,CC BY 4.0,https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets
+OpenLORIS,SLAM/Mapping,Indoor,Long-term SLAM,High,50GB,CC BY 4.0,https://github.com/PengYu-Team/OpenLORIS-Scene
+RobotCar Seasons,SLAM/Mapping,Outdoor,Long-term localization,High,20TB,CC BY-NC-SA 4.0,https://robotcar-dataset.robots.ox.ac.uk/
+ETH3D SLAM,SLAM/Mapping,General,Multi-view SLAM,Medium,50GB,CC BY 4.0,https://www.eth3d.net/
+7-Scenes,SLAM/Mapping,Indoor,RGB-D SLAM,High,8GB,CC BY 4.0,https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/
+Human3.6M,Human Detection,General,Human pose and action,High,50GB,Research use,http://vision.imar.ro/human3.6m/
+PoseTrack,Human Detection,General,Multi-person pose tracking,High,30GB,CC BY 4.0,https://posetrack.net/
+CrowdHuman,Human Detection,General,Crowd human detection,High,20GB,CC BY 4.0,https://www.crowdhuman.org/
+JTA,Human Detection,General,Joint track auto,Medium,15GB,CC BY 4.0,https://github.com/silvioantoniano/JTA-Dataset
+HAA4D,Human Detection,General,Human action analysis,Low,10GB,CC BY 4.0,https://github.com/HA4D
+COCO-Pose,Human Detection,General,Human pose estimation,High,25GB,CC BY 4.0,https://cocodataset.org/
+MPII Human Pose,Human Detection,General,Human pose estimation,High,15GB,CC BY 4.0,http://human-pose.mpi-inf.mpg.de/
+LIP,Human Detection,General,Look into person,Medium,10GB,CC BY 4.0,https://github.com/Engineering-Course/LIP_SSL
+DensePose,Human Detection,General,Dense human pose,High,50GB,CC BY-NC 4.0,https://github.com/facebookresearch/DensePose
+WEPDTOF,Human Detection,Outdoor,Walking pedestrian dataset,High,20GB,CC BY 4.0,https://github.com/wepdtof

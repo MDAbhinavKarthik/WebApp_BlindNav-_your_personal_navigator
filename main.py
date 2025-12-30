@@ -10,9 +10,13 @@ import winsound
 import sys
 import random
 import time
+from collections import Counter
+from difflib import get_close_matches
 from utils.speech_utils import speak, listen_for_speech
 # import requests
 import pyttsx3
+from modes.bus_detection_mode import run_bus_detection_mode
+from utils.multi_model_detector import MultiModelDetector, get_enhanced_detector
 # import speech_recognition as sr
 from datetime import datetime, timedelta
 import re
@@ -71,6 +75,8 @@ local_model = YOLO("yolov8n.pt")  # local detection model
 # Enhanced models for better detection
 enhanced_model = None  # Will be loaded on demand (YOLOv8m or YOLOv8x)
 detr_model = None  # DETR model for additional classes
+# Multi-model detector for comprehensive detection
+multi_model_detector = None  # Will be initialized on demand
 try:
     if BlipProcessor is not None and BlipForConditionalGeneration is not None:
         processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -1498,132 +1504,522 @@ engine = pyttsx3.init()
 
 engine = pyttsx3.init()
 
+OBJECT_QUERY_STOPWORDS = {
+    "something", "anything", "that", "which", "kind", "type", "maybe", "just",
+    "please", "thanks", "thank", "you", "me", "for", "of", "to", "around",
+    "near", "nearby", "close", "closest", "similar", "some", "sort", "look",
+    "find", "detect", "locate", "search", "show", "spot", "see", "resembling",
+    "resemble", "resembles", "resembling", "match", "matching", "like", "a",
+    "an", "the", "this", "that", "one", "object", "thing"
+}
+
+OBJECT_SYNONYMS = {
+    "humans": "person",
+    "human": "person",
+    "people": "person",
+    "man": "person",
+    "woman": "person",
+    "boy": "person",
+    "girl": "person",
+    "child": "person",
+    "kid": "person",
+    "lady": "person",
+    "gentleman": "person",
+    "bike": "bicycle",
+    "cycle": "bicycle",
+    "motorbike": "motorcycle",
+    "motor bike": "motorcycle",
+    "two wheeler": "motorcycle",
+    "car": "car",
+    "automobile": "car",
+    "vehicle": "car",
+    "bus": "bus",
+    "truck": "truck",
+    "lorry": "truck",
+    "handbag": "handbag",
+    "bag": "handbag",
+    "backpack": "backpack",
+    "sack": "backpack",
+    "cellphone": "cell phone",
+    "cell phone": "cell phone",
+    "mobile": "cell phone",
+    "mobile phone": "cell phone",
+    "smartphone": "cell phone",
+    "phone": "cell phone",
+    "laptop": "laptop",
+    "notebook": "laptop",
+    "monitor": "tvmonitor",
+    "television": "tvmonitor",
+    "tv": "tvmonitor",
+    "tv monitor": "tvmonitor",
+    "traffic signal": "traffic light",
+    "signal": "traffic light",
+    "light": "traffic light",
+    "sofa": "couch",
+    "couch": "couch",
+    "coach": "couch",
+    "dining table": "dining table"
+}
+
+HOUSEHOLD_MATERIAL_SYNONYMS = {
+    "wood": {"wood", "wooden", "timber", "plywood", "board"},
+    "plastic": {"plastic", "plastics", "polymer"},
+    "metal": {"metal", "metallic", "steel", "aluminium", "aluminum"},
+    "glass": {"glass", "glassy", "glassware"},
+    "ceramic": {"ceramic", "porcelain", "tile", "tiles", "earthenware"},
+    "fabric": {"fabric", "textile", "cloth", "woven", "linen"},
+    "rubber": {"rubber", "latex", "elastomer"},
+    "paper": {"paper", "papers", "cardboard", "paperboard", "carton"},
+    "stone": {"stone", "stones", "marble", "granite"},
+    "composite": {"composite", "laminate", "laminated", "mdf", "fibreboard", "fiberboard"}
+}
+
+ROADSIDE_MATERIAL_SYNONYMS = {
+    "asphalt": {"asphalt", "tarmac", "bitumen", "bituminous"},
+    "concrete": {"concrete", "cement", "pavement", "sidewalk"},
+    "metal": {"metal", "steel", "iron", "aluminium", "aluminum"},
+    "plastic": {"plastic", "polymer"},
+    "rubber": {"rubber", "tyre", "tyres", "tire", "tires"},
+    "paint": {"paint", "painted", "road marking", "lane marking", "striping"},
+    "glass": {"glass", "glassy", "transparent panel"},
+    "wood": {"wood", "wooden", "timber"},
+    "soil": {"soil", "dirt", "earth", "mud", "ground", "gravel", "pebbles"},
+    "vegetation": {"vegetation", "plant", "plants", "tree", "trees", "grass", "bush", "bushes", "shrub", "shrubs", "foliage", "greenery"}
+}
+
+MATERIAL_SYNONYM_LOOKUP = {}
+for _mat_name, _aliases in HOUSEHOLD_MATERIAL_SYNONYMS.items():
+    MATERIAL_SYNONYM_LOOKUP[_mat_name] = set(_aliases)
+for _mat_name, _aliases in ROADSIDE_MATERIAL_SYNONYMS.items():
+    MATERIAL_SYNONYM_LOOKUP.setdefault(_mat_name, set()).update(_aliases)
+for _mat_name in MATERIAL_SYNONYM_LOOKUP:
+    MATERIAL_SYNONYM_LOOKUP[_mat_name].add(_mat_name)
+    MATERIAL_SYNONYM_LOOKUP[_mat_name] = {alias.lower() for alias in MATERIAL_SYNONYM_LOOKUP[_mat_name]}
+    for _alias in MATERIAL_SYNONYM_LOOKUP[_mat_name]:
+        OBJECT_SYNONYMS[_alias] = _mat_name
+
+MATERIAL_CANONICAL_NAMES = set(MATERIAL_SYNONYM_LOOKUP.keys())
+
+MATERIAL_FRIENDLY_NAMES = {
+    "paper": "paper or cardboard",
+    "stone": "stone or marble",
+    "composite": "composite material",
+    "soil": "soil or gravel",
+    "vegetation": "greenery",
+    "paint": "road paint",
+    "asphalt": "asphalt",
+    "concrete": "concrete",
+    "rubber": "rubber",
+    "glass": "glass",
+    "metal": "metal",
+    "plastic": "plastic",
+    "wood": "wood",
+    "ceramic": "ceramic",
+    "fabric": "fabric"
+}
+
+
+def _canonicalize_name(raw_name):
+    if not raw_name:
+        return None
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", raw_name.lower())
+    tokens = [tok for tok in cleaned.split() if tok and tok not in OBJECT_QUERY_STOPWORDS]
+    if not tokens:
+        return None
+    candidate = " ".join(tokens[:3]).strip()
+    if candidate in OBJECT_SYNONYMS:
+        return OBJECT_SYNONYMS[candidate]
+    for tok in reversed(tokens):
+        mapped = OBJECT_SYNONYMS.get(tok)
+        if mapped:
+            return mapped
+    return candidate
+
+
+def _with_article(name):
+    if not name:
+        return "the object"
+    friendly = _friendly_label(name)
+    first_char = friendly.strip()[0] if friendly.strip() else ""
+    if first_char in "aeiou":
+        return f"an {friendly}"
+    return f"a {friendly}"
+
+
+def _friendly_label(label):
+    if not label:
+        return "object"
+    norm = label.replace("_", " ").strip()
+    lower_norm = norm.lower()
+    if lower_norm in MATERIAL_FRIENDLY_NAMES:
+        return MATERIAL_FRIENDLY_NAMES[lower_norm]
+    if lower_norm == "tvmonitor":
+        return "TV monitor"
+    if lower_norm == "cell phone":
+        return "cell phone"
+    if lower_norm == "cellphone":
+        return "cell phone"
+    return norm
+
+
+def _labels_match(det_label, query_label):
+    det = _canonicalize_name(det_label)
+    query = _canonicalize_name(query_label)
+    return bool(det and query and det == query)
+
+
+def _labels_close(det_label, query_label):
+    det = _canonicalize_name(det_label)
+    query = _canonicalize_name(query_label)
+    if not det or not query:
+        return False
+    if det == query:
+        return True
+    if det in query or query in det:
+        return True
+    match = get_close_matches(query, [det], n=1, cutoff=0.68)
+    return bool(match)
+
+
+def _direction_phrase(center_x, frame_width):
+    if frame_width <= 0:
+        return "nearby"
+    if center_x < frame_width * 0.33:
+        return "toward your left"
+    if center_x > frame_width * 0.66:
+        return "toward your right"
+    return "right in front of you"
+
+
+def _proximity_phrase(area_ratio):
+    if area_ratio >= 0.25:
+        return "very close"
+    if area_ratio >= 0.12:
+        return "within a couple of steps"
+    if area_ratio >= 0.05:
+        return "a short distance away"
+    return "a bit farther away"
+
+
+def _is_material_query(name):
+    return bool(name and name in MATERIAL_CANONICAL_NAMES)
+
+
+def _material_synonyms(name):
+    return MATERIAL_SYNONYM_LOOKUP.get(name, {name})
+
+
+def detect_material_presence(material_name, scan_attempts=3):
+    if processor is None or model_blip is None:
+        speak("Material detection is unavailable right now because the scene description model is offline.")
+        return None
+
+    speak(f"Looking for surfaces that appear to be {MATERIAL_FRIENDLY_NAMES.get(material_name, material_name)}.")
+
+    matches = []
+    captions = []
+    synonyms = _material_synonyms(material_name)
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        speak("I can’t access the camera. Please check it and try again.")
+        return None
+
+    try:
+        for _ in range(scan_attempts):
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            caption = _generate_caption_from_frame(frame)
+            if not caption:
+                continue
+
+            captions.append(caption)
+            caption_lower = caption.lower()
+            found = [syn for syn in synonyms if syn in caption_lower]
+            if found:
+                matches.extend(found)
+                break
+
+            time.sleep(0.5)
+    finally:
+        cap.release()
+
+    friendly_name = MATERIAL_FRIENDLY_NAMES.get(material_name, material_name)
+
+    if matches:
+        if captions:
+            speak(f"I can see areas that look like {friendly_name}. I notice {captions[-1]}.")
+        else:
+            speak(f"I can see areas that look like {friendly_name}.")
+        return material_name
+
+    if captions:
+        speak(f"I saw {captions[-1]}. I didn’t clearly spot any {friendly_name}-like surfaces. Try adjusting the camera or lighting.")
+    else:
+        speak("I couldn’t analyze the scene just now. Please try again.")
+
+    return material_name
+
+
 def run_object_detection_mode():
     speak("Object Detection Mode Activated. You can ask me to find any object around you.")
-    speak("Say, for example, 'Find a bottle', or 'Describe the scene'.")
+    speak("For example, say 'Find a bottle', 'Something like a chair', or 'Do you see any wood or plastic?'.")
 
-    last_detection = None
-    cap = None
+    last_requested_object = None
+    missed_listens = 0
 
     while True:
-        user_input = listen_for_speech().lower().strip()
+        raw_input = listen_for_speech()
+        if raw_input is None:
+            missed_listens += 1
+            if missed_listens >= 2:
+                speak("I didn’t catch that. You can ask me to find an object or say 'Describe the scene'.")
+                missed_listens = 0
+            continue
 
+        missed_listens = 0
+        user_input = raw_input.lower().strip()
         if not user_input:
             continue
 
-        # Exit condition - run continuously until exit is said
         if is_exit_command(user_input):
             speak("Exiting Object Detection Mode and returning to the main system.")
-            if cap:
-                cap.release()
             break
 
-        # User asks to describe surroundings
-        elif "describe" in user_input or "what do you see" in user_input:
+        if "describe" in user_input or "what do you see" in user_input:
             describe_scene()
             continue
 
-        # User asks to repeat
-        elif "repeat" in user_input and last_detection:
-            speak(f"Repeating last detection: {last_detection}")
+        if "repeat" in user_input or "search again" in user_input or "try again" in user_input:
+            if not last_requested_object:
+                speak("You haven’t asked me to find anything yet. Please name an object first.")
+            else:
+                speak(f"Scanning again for {_with_article(last_requested_object)}.")
+                detect_object(last_requested_object)
             continue
 
-        # Detect specific object
-        elif "find" in user_input or "detect" in user_input or "locate" in user_input:
+        if any(keyword in user_input for keyword in ["find", "detect", "locate", "search", "look for", "show", "similar", "resemble"]):
             object_name = extract_object_name(user_input)
             if not object_name:
                 speak("I didn’t catch the object name. Please say it again.")
-                continue
-            last_detection = detect_object(object_name)
             continue
 
-        # Retry search
-        elif "search again" in user_input or "try again" in user_input:
-            if not last_detection:
-                speak("You haven’t searched for anything yet. Please say an object name.")
-            else:
-                last_detection = detect_object(last_detection)
+            last_requested_object = object_name
+            detect_object(object_name)
             continue
 
-        else:
-            speak(f"I heard '{user_input}', but I’m not sure what to do. Try saying 'Find bottle' or 'Describe scene'.")
+        speak(f"I heard '{user_input}'. Try saying 'Find the chair', 'Describe the scene', or 'Exit mode'.")
 
 
 # -------------------------
 # Helper functions
 # -------------------------
 def extract_object_name(command):
-    keywords = ["find", "detect", "locate", "search for", "show me", "look for"]
-    for key in keywords:
-        if key in command:
-            name = command.replace(key, "").strip()
-            return name
-    return None
+    if not command:
+        return None
+
+    lowered = command.lower()
+    patterns = [
+        r"(?:find|detect|locate|search for|look for|show me|spot|identify)\s+(?:me\s+)?(.+)",
+        r"(?:something|anything)?\s*like\s+(?:a|an|the)?\s*(.+)",
+        r"resembl(?:e|es|ing)\s+(?:a|an|the)?\s*(.+)",
+        r"(?:similar\s+to|same\s+as)\s+(?:a|an|the)?\s*(.+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            name = match.group(1)
+            canonical = _canonicalize_name(name)
+            if canonical:
+                return canonical
+
+    return _canonicalize_name(lowered)
 
 
-def detect_object(object_name):
-    speak(f"Searching for {object_name}. Please hold still while I scan your surroundings.")
+def detect_object(object_query, max_scan_time=15.0):
+    canonical_name = _canonicalize_name(object_query)
+    if not canonical_name:
+        speak("I’m not sure which object to look for. Please try again.")
+        return None
+
+    if _is_material_query(canonical_name):
+        return detect_material_presence(canonical_name)
+
+    if 'local_model' not in globals() or local_model is None:
+        speak("The object detection model is not ready right now.")
+        return None
+
+    speak(f"Searching for {_with_article(canonical_name)}. Please hold still while I scan the area.")
+
     cap = cv2.VideoCapture(0)
-    found_local = False
-    similar_objects = set()
+    if not cap.isOpened():
+        speak("I can’t access the camera. Please check it and try again.")
+        return None
 
     start_time = time.time()
     rotation_prompts = [
-        "Please turn a little to your left.",
+        "Please turn a little to your left so I can scan wider.",
         "Now turn slightly to your right.",
-        "Try facing behind you.",
-        "Look a bit upwards or downwards."
+        "Try facing behind you for a moment.",
+        "Adjust the camera up or down a bit."
     ]
-    rotation_index = 0
+    next_prompt_time = start_time + 4.5
+    prompt_index = 0
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    similar_objects = Counter()
+    best_fuzzy_match = None
+    best_fuzzy_conf = 0.0
+    best_fuzzy_box = None
 
-        results = local_model(frame, verbose=False)
-        detections = results[0].boxes
-        labels = [local_model.names[int(cls)] for cls in detections.cls]
+    found_box = None
+    frame_width = 0
+    frame_height = 0
 
-        # Check for requested object
-        if object_name.lower() in [l.lower() for l in labels]:
-            found_local = True
-            speak(f"I found a {object_name} nearby.")
-            break
-        else:
-            similar_objects.update(labels)
+    # Try to use multi-model detector if available
+    global multi_model_detector
+    if multi_model_detector is None:
+        try:
+            multi_model_detector = get_enhanced_detector()
+        except Exception as e:
+            print(f"[MultiModel] Could not initialize: {e}")
+            multi_model_detector = False  # Mark as unavailable
+    
+    use_multi_model = multi_model_detector and multi_model_detector is not False
+    
+    try:
+        while time.time() - start_time < max_scan_time:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # Rotate suggestion if not found
-        if time.time() - start_time > 4 and rotation_index < len(rotation_prompts):
-            speak(rotation_prompts[rotation_index])
-            rotation_index += 1
-            start_time = time.time()
+            try:
+                if use_multi_model:
+                    # Use multi-model detector for better coverage
+                    detection = multi_model_detector.detect_object_by_name(frame, canonical_name)
+                    if detection:
+                        found_box = type('Box', (), {
+                            'xyxy': [np.array(detection['bbox'])],
+                            'conf': [detection['confidence']],
+                            'cls': [detection['class_id']]
+                        })()
+                        frame_height, frame_width = frame.shape[:2]
+                        break
+                    
+                    # Also check all detections for similar objects
+                    all_detected = multi_model_detector.get_all_detected_objects(frame)
+                    for obj in all_detected:
+                        canonical_label = _canonicalize_name(obj)
+                        if canonical_label:
+                            similar_objects.update([canonical_label])
+                
+                # Fallback to local model
+                results = local_model(frame, verbose=False)
+            except Exception as model_err:
+                print("[Object detection error]", model_err)
+                speak("I ran into an issue while analyzing the camera feed.")
+                break
 
-        # After full rotation
-        if rotation_index >= len(rotation_prompts):
-            break
+            if not results:
+                continue
 
-    cap.release()
+            frame_height, frame_width = frame.shape[:2]
+            result = results[0]
+            if not hasattr(result, "boxes"):
+                continue
 
-    # If not found locally, use online Hugging Face
-    if not found_local:
-        speak(f"I couldn’t find {object_name} nearby. Let me check online vision.")
-        caption = run_online_detection()
+            detections = result.boxes
+            if detections is None:
+                continue
 
-        if object_name.lower() in caption.lower():
-            speak(f"I think I found a {object_name}. {caption}.")
-        else:
-            speak(f"Sorry, I couldn’t find any {object_name}. {caption}.")
+            for box in detections:
+                if box.conf is None or box.cls is None:
+                    continue
+                conf = float(box.conf[0])
+                if conf < 0.30:
+                    continue
 
-        if similar_objects:
-            speak(f"I did notice some similar objects like {', '.join(similar_objects)} around you.")
-        else:
-            speak("No other similar objects detected nearby.")
+                cls_id = int(box.cls[0])
+                names = local_model.names
+                if isinstance(names, dict):
+                    label = names.get(cls_id, str(cls_id))
+                else:
+                    label = names[cls_id] if 0 <= cls_id < len(names) else str(cls_id)
 
-        return object_name
+                canonical_label = _canonicalize_name(label)
+                if canonical_label:
+                    similar_objects.update([canonical_label])
+                else:
+                    similar_objects.update([label])
 
+                if _labels_match(label, canonical_name):
+                    found_box = box
+                    break
+
+                if _labels_close(label, canonical_name) and conf > best_fuzzy_conf:
+                    best_fuzzy_match = label
+                    best_fuzzy_conf = conf
+                    best_fuzzy_box = box
+
+            if found_box is not None:
+                break
+
+            current_time = time.time()
+            if current_time >= next_prompt_time and prompt_index < len(rotation_prompts):
+                speak(rotation_prompts[prompt_index])
+                prompt_index += 1
+                next_prompt_time = current_time + 4.5
+
+    finally:
+        cap.release()
+
+    if found_box is not None:
+        coords = found_box.xyxy[0].tolist()
+        x1, y1, x2, y2 = coords
+        frame_area = (frame_width * frame_height) if frame_width and frame_height else 1.0
+        area_ratio = max(((x2 - x1) * (y2 - y1)) / frame_area, 0.0)
+        direction = _direction_phrase((x1 + x2) / 2.0, frame_width)
+        proximity = _proximity_phrase(area_ratio)
+        speak(f"I found {_with_article(canonical_name)} {direction}. It looks {proximity}.")
+        return canonical_name
+
+    if best_fuzzy_match and best_fuzzy_box is not None:
+        coords = best_fuzzy_box.xyxy[0].tolist()
+        x1, y1, x2, y2 = coords
+        frame_area = (frame_width * frame_height) if frame_width and frame_height else 1.0
+        area_ratio = max(((x2 - x1) * (y2 - y1)) / frame_area, 0.0)
+        direction = _direction_phrase((x1 + x2) / 2.0, frame_width)
+        proximity = _proximity_phrase(area_ratio)
+        speak(f"I couldn’t spot {_with_article(canonical_name)}, but I do see {_with_article(best_fuzzy_match)} {direction}. It seems {proximity}.")
+        speak("Let me know if you want me to focus on that instead.")
+        return canonical_name
+
+    top_similar = [label for label, _count in similar_objects.most_common(3) if label]
+    if top_similar:
+        friendly_similar = ", ".join(_friendly_label(lbl) for lbl in top_similar)
+        speak(f"I couldn't find anything that resembles {_with_article(canonical_name)}. I did notice {friendly_similar}.")
+        speak("Try pointing the camera differently or naming one of those.")
     else:
-        return object_name
+        speak(f"I scanned the area, but I didn't find anything resembling {_with_article(canonical_name)}. Please adjust the camera or lighting and try again.")
+
+    return canonical_name
+
+
+def _generate_caption_from_frame(frame):
+    if processor is None or model_blip is None:
+        return ""
+
+    try:
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        inputs = processor(img, return_tensors="pt")
+        out = model_blip.generate(**inputs)
+        caption = processor.decode(out[0], skip_special_tokens=True)
+        return caption
+    except Exception as _cap_err:
+        print("[Caption Error]", _cap_err)
+        return ""
 
 
 def run_online_detection():
@@ -1634,26 +2030,349 @@ def run_online_detection():
         speak("Camera error while capturing frame.")
         return ""
 
-    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    inputs = processor(img, return_tensors="pt")
-    out = model_blip.generate(**inputs)
-    caption = processor.decode(out[0], skip_special_tokens=True)
-    print(f"[Online Caption]: {caption}")
+    caption = _generate_caption_from_frame(frame)
+    if caption:
+        print(f"[Online Caption]: {caption}")
     return caption
+
+
+# ===============================
+# HUMAN ACTIVITY DETECTION
+# ===============================
+
+# Initialize MediaPipe pose detection
+mp_pose = None
+pose_detector = None
+if MEDIAPIPE_AVAILABLE:
+    try:
+        mp_pose = mp.solutions.pose
+        pose_detector = mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+    except Exception as e:
+        print(f"[MediaPipe Pose Init Error]: {e}")
+        pose_detector = None
+
+
+def analyze_human_activity(frame, person_boxes=None):
+    """
+    Analyze human activity in the frame using pose estimation.
+    Detects if people are standing, sitting, walking, running, or moving.
+    
+    Args:
+        frame: BGR image frame
+        person_boxes: List of bounding boxes for detected persons [(x1, y1, x2, y2), ...]
+    
+    Returns:
+        List of dicts with activity info for each detected person
+    """
+    activities = []
+    
+    if not MEDIAPIPE_AVAILABLE or pose_detector is None:
+        # Fallback: Use simple heuristics based on bounding box aspect ratio
+        if person_boxes:
+            for i, box in enumerate(person_boxes):
+                x1, y1, x2, y2 = box
+                width = x2 - x1
+                height = y2 - y1
+                aspect_ratio = height / width if width > 0 else 1
+                
+                # Heuristic: Standing person has aspect ratio > 2, sitting < 1.5
+                if aspect_ratio > 2.2:
+                    activity = "standing"
+                elif aspect_ratio < 1.3:
+                    activity = "sitting"
+                else:
+                    activity = "standing or moving"
+                
+                activities.append({
+                    'person_id': i + 1,
+                    'activity': activity,
+                    'confidence': 0.6,
+                    'box': box
+                })
+        return activities
+    
+    try:
+        # Convert to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w = frame.shape[:2]
+        
+        # If we have specific person boxes, analyze each
+        if person_boxes and len(person_boxes) > 0:
+            for i, box in enumerate(person_boxes):
+                x1, y1, x2, y2 = [int(c) for c in box]
+                # Add padding
+                pad = 20
+                x1 = max(0, x1 - pad)
+                y1 = max(0, y1 - pad)
+                x2 = min(w, x2 + pad)
+                y2 = min(h, y2 + pad)
+                
+                person_crop = rgb_frame[y1:y2, x1:x2]
+                if person_crop.size == 0:
+                    continue
+                
+                activity_info = detect_single_person_activity(person_crop, pose_detector)
+                activity_info['person_id'] = i + 1
+                activity_info['box'] = box
+                activities.append(activity_info)
+        else:
+            # Analyze entire frame for poses
+            results = pose_detector.process(rgb_frame)
+            if results.pose_landmarks:
+                activity_info = analyze_pose_landmarks(results.pose_landmarks, h, w)
+                activity_info['person_id'] = 1
+                activities.append(activity_info)
+        
+        return activities
+        
+    except Exception as e:
+        print(f"[Human Activity Detection Error]: {e}")
+        return []
+
+
+def detect_single_person_activity(person_image, detector):
+    """Detect activity for a single person crop."""
+    try:
+        results = detector.process(person_image)
+        if results.pose_landmarks:
+            h, w = person_image.shape[:2]
+            return analyze_pose_landmarks(results.pose_landmarks, h, w)
+        else:
+            # Fallback to aspect ratio heuristic
+            h, w = person_image.shape[:2]
+            aspect_ratio = h / w if w > 0 else 1
+            if aspect_ratio > 2.2:
+                return {'activity': 'standing', 'confidence': 0.5}
+            elif aspect_ratio < 1.3:
+                return {'activity': 'sitting', 'confidence': 0.5}
+            else:
+                return {'activity': 'present', 'confidence': 0.4}
+    except:
+        return {'activity': 'present', 'confidence': 0.3}
+
+
+def analyze_pose_landmarks(landmarks, frame_height, frame_width):
+    """
+    Analyze pose landmarks to determine activity.
+    Uses key body points to classify standing, sitting, walking, running, etc.
+    """
+    try:
+        # Get key landmark positions
+        lm = landmarks.landmark
+        
+        # Key points (normalized 0-1)
+        nose = lm[mp_pose.PoseLandmark.NOSE]
+        left_shoulder = lm[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = lm[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        left_hip = lm[mp_pose.PoseLandmark.LEFT_HIP]
+        right_hip = lm[mp_pose.PoseLandmark.RIGHT_HIP]
+        left_knee = lm[mp_pose.PoseLandmark.LEFT_KNEE]
+        right_knee = lm[mp_pose.PoseLandmark.RIGHT_KNEE]
+        left_ankle = lm[mp_pose.PoseLandmark.LEFT_ANKLE]
+        right_ankle = lm[mp_pose.PoseLandmark.RIGHT_ANKLE]
+        
+        # Calculate body angles and positions
+        shoulder_y = (left_shoulder.y + right_shoulder.y) / 2
+        hip_y = (left_hip.y + right_hip.y) / 2
+        knee_y = (left_knee.y + right_knee.y) / 2
+        ankle_y = (left_ankle.y + right_ankle.y) / 2
+        
+        # Torso angle (vertical alignment)
+        torso_length = hip_y - shoulder_y
+        
+        # Leg positions
+        hip_knee_diff = knee_y - hip_y
+        knee_ankle_diff = ankle_y - knee_y
+        
+        # Check leg spread (walking/running indicator)
+        left_ankle_x = left_ankle.x
+        right_ankle_x = right_ankle.x
+        ankle_spread = abs(left_ankle_x - right_ankle_x)
+        
+        # Knee bend angle approximation
+        left_knee_bend = abs(left_knee.y - (left_hip.y + left_ankle.y) / 2)
+        right_knee_bend = abs(right_knee.y - (right_hip.y + right_ankle.y) / 2)
+        avg_knee_bend = (left_knee_bend + right_knee_bend) / 2
+        
+        # Activity classification
+        activity = "present"
+        confidence = 0.5
+        
+        # Sitting detection: hips close to knees vertically, knees bent significantly
+        if hip_knee_diff < 0.15 and avg_knee_bend > 0.05:
+            activity = "sitting"
+            confidence = 0.85
+        
+        # Lying down detection: shoulder and hip at similar y level
+        elif abs(shoulder_y - hip_y) < 0.1 and abs(hip_y - ankle_y) < 0.15:
+            activity = "lying down"
+            confidence = 0.8
+        
+        # Running detection: wide ankle spread + vertical torso
+        elif ankle_spread > 0.25 and torso_length > 0.15:
+            activity = "running"
+            confidence = 0.75
+        
+        # Walking detection: moderate ankle spread
+        elif ankle_spread > 0.12 and ankle_spread < 0.25:
+            activity = "walking"
+            confidence = 0.7
+        
+        # Standing detection: vertical alignment, small ankle spread
+        elif torso_length > 0.12 and ankle_spread < 0.12:
+            activity = "standing"
+            confidence = 0.85
+        
+        # Bending/reaching detection
+        elif shoulder_y > hip_y * 0.9:
+            activity = "bending or reaching"
+            confidence = 0.65
+        
+        else:
+            activity = "moving"
+            confidence = 0.6
+        
+        return {
+            'activity': activity,
+            'confidence': confidence,
+            'pose_data': {
+                'torso_length': torso_length,
+                'ankle_spread': ankle_spread,
+                'avg_knee_bend': avg_knee_bend
+            }
+        }
+        
+    except Exception as e:
+        print(f"[Pose Analysis Error]: {e}")
+        return {'activity': 'present', 'confidence': 0.3}
+
+
+# Store previous frame data for motion detection
+_previous_person_positions = {}
+_frame_timestamp = 0
+
+
+def detect_motion_between_frames(current_boxes, frame_width):
+    """
+    Detect if people are moving by comparing positions between frames.
+    Returns motion status for each detected person.
+    """
+    global _previous_person_positions, _frame_timestamp
+    
+    current_time = time.time()
+    motion_info = []
+    
+    for i, box in enumerate(current_boxes):
+        x1, y1, x2, y2 = box
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        
+        person_key = f"person_{i}"
+        
+        if person_key in _previous_person_positions:
+            prev_x, prev_y, prev_time = _previous_person_positions[person_key]
+            time_diff = current_time - prev_time
+            
+            if time_diff > 0:
+                # Calculate movement speed (normalized by frame width)
+                dx = abs(center_x - prev_x) / frame_width
+                dy = abs(center_y - prev_y) / frame_width
+                movement = (dx**2 + dy**2)**0.5
+                speed = movement / time_diff
+                
+                if speed > 0.15:
+                    motion_status = "moving quickly"
+                elif speed > 0.05:
+                    motion_status = "moving"
+                elif speed > 0.01:
+                    motion_status = "moving slowly"
+                else:
+                    motion_status = "stationary"
+                
+                motion_info.append({
+                    'person_id': i + 1,
+                    'motion': motion_status,
+                    'speed': speed
+                })
+        
+        # Update position
+        _previous_person_positions[person_key] = (center_x, center_y, current_time)
+    
+    # Clean old entries
+    if current_time - _frame_timestamp > 5:
+        _previous_person_positions = {k: v for k, v in _previous_person_positions.items() 
+                                      if current_time - v[2] < 3}
+        _frame_timestamp = current_time
+    
+    return motion_info
+
+
+def prompt_and_listen(prompt_text, timeout=6, phrase_limit=5):
+    """
+    Speak a prompt and then listen for user response.
+    Automatically enables microphone after speaking.
+    
+    Args:
+        prompt_text: What to ask the user
+        timeout: How long to wait for speech
+        phrase_limit: Max phrase duration
+    
+    Returns:
+        User's spoken response or None
+    """
+    speak(prompt_text)
+    time.sleep(0.5)  # Brief pause before listening
+    
+    # Visual/audio indicator that we're listening
+    print("🎤 [LISTENING] Microphone activated - waiting for your response...")
+    
+    response = listen_for_speech(timeout=timeout, phrase_time_limit=phrase_limit)
+    
+    if response:
+        print(f"✅ [HEARD]: {response}")
+        return response.lower().strip()
+    else:
+        print("⚠️ [NO RESPONSE] - No speech detected")
+        return None
 
 
 def describe_scene():
     """
     Enhanced scene description with conversational flow matching the examples.
     Captures scenes from multiple directions with natural turn-by-turn guidance.
+    Includes dynamic human activity detection (standing, sitting, walking, running).
+    
+    Features:
+    - Human-like conversational guidance like a trusted companion
+    - Voice prompts with automatic microphone activation
+    - Reassuring feedback at each step
     """
     global user_name
     
-    # First, determine if indoor or outdoor with a quick scan
-    speak(f"Sure, {user_name}. Let me analyze your surroundings.")
+    # Warm, reassuring introduction
+    speak(f"Of course, {user_name}. I'm right here with you. Let me be your eyes and describe everything around you.")
+    time.sleep(0.8)
+    speak("I'll guide you to turn slowly so I can capture a complete picture of your surroundings. Don't worry, I'll tell you exactly when to turn and when to stop.")
+    time.sleep(1)
+    
+    # Storage for all direction captures
+    direction_data = {
+        'front': {'caption': '', 'objects': [], 'traffic': None, 'road': None, 'humans': []},
+        'left': {'caption': '', 'objects': [], 'traffic': None, 'road': None, 'humans': []},
+        'right': {'caption': '', 'objects': [], 'traffic': None, 'road': None, 'humans': []},
+        'back': {'caption': '', 'objects': [], 'traffic': None, 'road': None, 'humans': []}
+    }
     
     # Quick initial scan to determine environment
     cap = cv2.VideoCapture(0)
+    is_indoor = True
+    is_outdoor = False
+    
     if cap.isOpened():
         ret, initial_frame = cap.read()
         if ret:
@@ -1672,109 +2391,571 @@ def describe_scene():
                 outdoor_indicators = ["car", "bus", "truck", "traffic light", "road", "sidewalk"]
                 indoor_indicators = ["door", "window", "table", "chair", "computer", "bed", "sofa", "tvmonitor"]
                 is_outdoor = any(obj in outdoor_indicators for obj in initial_detections)
-                is_indoor = any(obj in indoor_indicators for obj in initial_detections)
+                is_indoor = any(obj in indoor_indicators for obj in initial_detections) or not is_outdoor
             except:
-                is_indoor = True  # Default to indoor
-                is_outdoor = False
-        else:
-            is_indoor = True
-            is_outdoor = False
+                pass
         cap.release()
+    
+    # =====================
+    # CAPTURE FRONT VIEW
+    # =====================
+    speak("Alright, let's start. First, just face forward naturally, wherever you're most comfortable. Take your time, I'm not going anywhere.")
+    time.sleep(2.5)
+    speak("Perfect. Hold still for just a moment while I take a look at what's in front of you.")
+    time.sleep(1)
+    
+    front_caption, front_objects, front_traffic, front_road, front_humans = capture_and_analyze_direction_enhanced("front")
+    direction_data['front'] = {
+        'caption': front_caption, 'objects': front_objects, 
+        'traffic': front_traffic, 'road': front_road, 'humans': front_humans
+    }
+    
+    # Provide immediate feedback about what's ahead
+    if front_humans:
+        speak(f"Got it. I can see {'someone' if len(front_humans) == 1 else 'some people'} ahead of you.")
+    elif front_objects:
+        speak(f"Good, I can see {len(front_objects)} things in front of you.")
     else:
-        is_indoor = True
-        is_outdoor = False
+        speak("Nice, the area ahead looks fairly open.")
+    time.sleep(0.5)
     
-    # Indoor flow: left → center → right (and optionally back)
-    if is_indoor and not is_outdoor:
-        speak(f"To help me describe everything around you, please slowly turn to your left until I say stop.")
-        
-        # Capture while user turns left
-        left_captured = False
-        start_time = time.time()
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            while time.time() - start_time < 5:  # Give user time to turn
-                ret, frame = cap.read()
-                if ret:
-                    # Capture multiple frames while turning
-                    time.sleep(0.5)
-                    if not left_captured:
-                        left_caption, left_objects, left_traffic, left_road = capture_and_analyze_direction("left")
-                        left_captured = True
-                        break
-            cap.release()
-        
-        speak("Stop. Great, now please turn a little to your right, back to your center position.")
-        time.sleep(3)  # Give time to turn
-        
-        # Capture center/front
-        front_caption, front_objects, front_traffic, front_road = capture_and_analyze_direction("front")
-        
-        speak("Perfect. Now turn slightly more to your right, until I say stop.")
-        
-        # Capture while user turns right
-        right_captured = False
-        start_time = time.time()
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            while time.time() - start_time < 5:
-                ret, frame = cap.read()
-                if ret:
-                    time.sleep(0.5)
-                    if not right_captured:
-                        right_caption, right_objects, right_traffic, right_road = capture_and_analyze_direction("right")
-                        right_captured = True
-                        break
-            cap.release()
-        
-        speak(f"Stop. Thank you, {user_name}. I've analyzed the surroundings. Here's what I see:")
-        
-        # Capture back view (optional)
-        speak("Let me also check behind you.")
-        back_caption, back_objects, back_traffic, back_road = capture_and_analyze_direction("back")
-        
-    else:  # Outdoor flow: panoramic turn
-        speak(f"Please slowly turn around so I can capture your surroundings in all directions.")
-        
-        # Capture front
-        front_caption, front_objects, front_traffic, front_road = capture_and_analyze_direction("front")
-        time.sleep(1)
-        
-        # Capture left
-        speak("Keep turning slowly...")
-        left_caption, left_objects, left_traffic, left_road = capture_and_analyze_direction("left")
-        time.sleep(1)
-        
-        # Capture back
-        speak("Continue turning...")
-        back_caption, back_objects, back_traffic, back_road = capture_and_analyze_direction("back")
-        time.sleep(1)
-        
-        # Capture right
-        speak("Almost done...")
-        right_caption, right_objects, right_traffic, right_road = capture_and_analyze_direction("right")
-        
-        speak(f"Perfect, I've got a full view. Here's what I see:")
+    # =====================
+    # CAPTURE LEFT VIEW
+    # =====================
+    speak("Now, I need to see what's on your left. Turn your body slowly to the left... that's it, nice and easy...")
+    time.sleep(2)
+    speak("Keep turning a little more...")
+    time.sleep(2)
+    speak("Perfect, stop right there. You're doing great.")
+    time.sleep(1)
     
-    # Build comprehensive description
-    description = build_comprehensive_description(
-        front_caption, front_objects, front_traffic, front_road,
-        left_caption, left_objects, left_traffic, left_road,
-        right_caption, right_objects, right_traffic, right_road,
-        back_caption, back_objects, back_traffic, back_road
-    )
+    left_caption, left_objects, left_traffic, left_road, left_humans = capture_and_analyze_direction_enhanced("left")
+    direction_data['left'] = {
+        'caption': left_caption, 'objects': left_objects,
+        'traffic': left_traffic, 'road': left_road, 'humans': left_humans
+    }
     
+    # Immediate feedback
+    if 'door' in left_objects:
+        speak("I see there's a door on this side.")
+    elif 'window' in left_objects:
+        speak("I can see a window letting in some light.")
+    elif left_humans:
+        speak(f"I notice {'someone' if len(left_humans) == 1 else 'people'} over here.")
+    else:
+        speak("Okay, I've got a good view of your left side.")
+    time.sleep(0.5)
+    
+    # =====================
+    # CAPTURE BACK VIEW
+    # =====================
+    speak("Wonderful. Now let's see what's behind you. Continue turning left... you're doing great...")
+    time.sleep(2)
+    speak("A bit more... almost there...")
+    time.sleep(2)
+    speak("And stop. Perfect timing.")
+    time.sleep(1)
+    
+    back_caption, back_objects, back_traffic, back_road, back_humans = capture_and_analyze_direction_enhanced("back")
+    direction_data['back'] = {
+        'caption': back_caption, 'objects': back_objects,
+        'traffic': back_traffic, 'road': back_road, 'humans': back_humans
+    }
+    
+    # Safety-focused feedback for behind
+    if back_humans:
+        speak(f"Good to know, there's {'someone' if len(back_humans) == 1 else 'some people'} behind where you were facing.")
+    elif any(obj in back_objects for obj in ['car', 'bus', 'truck', 'motorcycle']):
+        speak("I can see some vehicles behind you. Good to be aware of that.")
+    else:
+        speak("Got it. I can see what's behind you now.")
+    time.sleep(0.5)
+    
+    # =====================
+    # CAPTURE RIGHT VIEW
+    # =====================
+    speak("Almost done. Just one more turn to see your right side. Keep turning left slowly...")
+    time.sleep(2)
+    speak("That's it... a little more...")
+    time.sleep(2)
+    speak("And stop. Excellent work.")
+    time.sleep(1)
+    
+    right_caption, right_objects, right_traffic, right_road, right_humans = capture_and_analyze_direction_enhanced("right")
+    direction_data['right'] = {
+        'caption': right_caption, 'objects': right_objects,
+        'traffic': right_traffic, 'road': right_road, 'humans': right_humans
+    }
+    
+    # Feedback for right side
+    if right_humans:
+        speak(f"I see {'someone' if len(right_humans) == 1 else 'people'} on your right.")
+    elif right_objects:
+        speak(f"I can see some things on your right side.")
+    else:
+        speak("Your right side looks clear.")
+    
+    time.sleep(0.5)
+    speak(f"Great job, {user_name}! Now turn back to face forward, where we started. Take your time.")
+    time.sleep(3)
+    
+    # =====================
+    # BUILD DESCRIPTION
+    # =====================
+    speak(f"Wonderful, {user_name}! I've now got a complete picture of everything around you. Let me tell you what I see.")
+    time.sleep(1)
+    
+    # Build comprehensive description with directions and human activities
+    description = build_comprehensive_description_enhanced(direction_data, is_indoor, is_outdoor)
     speak(description)
+    time.sleep(0.5)
     
-    # Ask follow-up questions
-    if is_indoor and not is_outdoor:
-        speak("Would you like me to describe specific objects in more detail — for example, what's on the table or near the door?")
-    else:
-        # Check if traffic signal was detected
-        if front_traffic == "red":
-            speak("When the signal turns green, I'll guide you safely across. Would you like me to keep monitoring traffic for you?")
+    # Summarize human activities with friendly context
+    all_humans = []
+    for direction, data in direction_data.items():
+        for human in data['humans']:
+            human['direction'] = direction
+            all_humans.append(human)
+    
+    if all_humans:
+        human_summary = build_human_activity_summary(all_humans)
+        speak(human_summary)
+        time.sleep(0.5)
+    
+    # Interactive follow-up with voice prompt
+    time.sleep(1)
+    if is_indoor:
+        speak("I'm happy to tell you more about anything specific. For example, I can describe what's on a table, or give you more details about the people nearby.")
+        time.sleep(0.5)
+        
+        # Prompt and listen for response
+        response = prompt_and_listen("What would you like to know more about? You can say 'nothing' if you're all set.")
+        
+        if response:
+            if any(word in response for word in ['nothing', 'no', 'fine', 'good', 'okay', 'done', 'that\'s all']):
+                speak("Alright! I'm right here whenever you need me. Just say 'describe' anytime you want me to look around again.")
+            elif any(word in response for word in ['table', 'desk']):
+                speak("Let me focus on the table area for you.")
+                # Could trigger detailed table analysis
+            elif any(word in response for word in ['people', 'person', 'someone', 'who']):
+                if all_humans:
+                    detailed_human = build_human_activity_summary(all_humans)
+                    speak(f"Here's more about the people around you. {detailed_human}")
+                else:
+                    speak("I don't see anyone around you at the moment.")
+            elif any(word in response for word in ['door', 'exit']):
+                doors_found = []
+                for direction, data in direction_data.items():
+                    if 'door' in data['objects']:
+                        doors_found.append(direction)
+                if doors_found:
+                    speak(f"I spotted a door on your {doors_found[0]}.")
+                else:
+                    speak("I didn't see any doors in my scan. Would you like me to look again?")
+            else:
+                speak(f"I heard you say {response}. Let me see what I can tell you about that.")
         else:
-            speak("Would you like me to keep monitoring your surroundings or help you navigate somewhere?")
+            speak("No worries if you didn't say anything. I'm here whenever you need me.")
+    else:
+        # Outdoor follow-up
+        if front_traffic == "red":
+            speak("Just so you know, the traffic signal ahead is red right now. Stay right where you are, and I'll keep an eye on it for you.")
+            time.sleep(0.5)
+            response = prompt_and_listen("Would you like me to tell you when it turns green?")
+            if response and any(word in response for word in ['yes', 'yeah', 'please', 'sure', 'okay']):
+                speak("Absolutely. I'll let you know the moment it's safe to cross. Just stay put for now.")
+                # Could trigger traffic monitoring mode
+            else:
+                speak("Okay, just be careful when you're ready to cross.")
+        else:
+            speak("The area looks good for you to move around. I'm right beside you if you need anything.")
+            time.sleep(0.5)
+            response = prompt_and_listen("Would you like directions somewhere, or should I keep watching your surroundings?")
+            if response:
+                if any(word in response for word in ['direction', 'navigate', 'go', 'walk', 'take me']):
+                    speak("Sure thing! Just tell me where you'd like to go, and I'll guide you there step by step.")
+                elif any(word in response for word in ['watch', 'monitor', 'keep', 'stay']):
+                    speak("I'll keep monitoring your surroundings and let you know if anything changes.")
+                else:
+                    speak("Got it. I'm here whenever you're ready.")
+
+
+def capture_and_analyze_direction_enhanced(direction):
+    """
+    Enhanced capture that includes human activity detection.
+    Returns: (caption, objects_list, traffic_info, road_info, human_activities)
+    """
+    try:
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            speak(f"Camera error while capturing {direction} view.")
+            return "", [], None, None, []
+        
+        # Capture multiple frames for better analysis
+        frames = []
+        person_boxes_all = []
+        
+        for _ in range(3):  # Capture 3 frames
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                frames.append(frame)
+            time.sleep(0.1)
+        
+        cap.release()
+        
+        if not frames:
+            return "", [], None, None, []
+        
+        # Use the middle frame for main analysis
+        main_frame = frames[len(frames)//2]
+        h, w = main_frame.shape[:2]
+        
+        # Convert to PIL Image for BLIP
+        img = Image.fromarray(cv2.cvtColor(main_frame, cv2.COLOR_BGR2RGB))
+        
+        # Get image caption using BLIP
+        caption = ""
+        if processor is not None and model_blip is not None:
+            try:
+                inputs = processor(img, return_tensors="pt")
+                out = model_blip.generate(**inputs)
+                caption = processor.decode(out[0], skip_special_tokens=True)
+                print(f"[{direction.capitalize()} Caption]: {caption}")
+            except Exception as e:
+                print(f"[Caption Error for {direction}]: {e}")
+        
+        # Get object detection using YOLO
+        objects = []
+        person_boxes = []
+        try:
+            results = local_model(main_frame, verbose=False)
+            for result in results:
+                for box in result.boxes:
+                    cls = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    if conf > 0.5:
+                        obj_name = local_model.names[cls]
+                        objects.append(obj_name)
+                        
+                        # Store person bounding boxes for activity analysis
+                        if obj_name == "person":
+                            x1, y1, x2, y2 = box.xyxy[0].tolist()
+                            person_boxes.append((x1, y1, x2, y2))
+            
+            objects_unique = list(set(objects))
+            print(f"[{direction.capitalize()} Objects]: {objects_unique}")
+        except Exception as e:
+            print(f"[Object Detection Error for {direction}]: {e}")
+            objects_unique = []
+        
+        # Analyze human activities
+        human_activities = []
+        if person_boxes:
+            # Analyze poses
+            activities = analyze_human_activity(main_frame, person_boxes)
+            
+            # Detect motion using multiple frames
+            if len(frames) >= 2:
+                motion_info = detect_motion_between_frames(person_boxes, w)
+                
+                # Combine activity and motion info
+                for activity in activities:
+                    pid = activity.get('person_id', 0)
+                    motion = next((m for m in motion_info if m['person_id'] == pid), None)
+                    
+                    if motion:
+                        # Update activity based on motion
+                        if motion['motion'] == 'moving quickly' and activity['activity'] in ['standing', 'present']:
+                            activity['activity'] = 'running or walking quickly'
+                        elif motion['motion'] == 'moving' and activity['activity'] == 'standing':
+                            activity['activity'] = 'walking'
+                        elif motion['motion'] == 'stationary' and activity['activity'] == 'moving':
+                            activity['activity'] = 'standing still'
+                        
+                        activity['motion'] = motion['motion']
+                    
+                    # Calculate position in frame
+                    if 'box' in activity:
+                        box = activity['box']
+                        center_x = (box[0] + box[2]) / 2
+                        if center_x < w * 0.33:
+                            activity['position'] = 'left side'
+                        elif center_x > w * 0.67:
+                            activity['position'] = 'right side'
+                        else:
+                            activity['position'] = 'center'
+                        
+                        # Estimate distance based on box height
+                        box_height = box[3] - box[1]
+                        height_ratio = box_height / h
+                        if height_ratio > 0.7:
+                            activity['distance'] = 'very close'
+                        elif height_ratio > 0.4:
+                            activity['distance'] = 'nearby'
+                        elif height_ratio > 0.2:
+                            activity['distance'] = 'a few steps away'
+                        else:
+                            activity['distance'] = 'far away'
+                    
+                    human_activities.append(activity)
+        
+        # Analyze traffic signals and road conditions
+        traffic_info = analyze_traffic_signals(main_frame)
+        road_info = analyze_road_conditions(main_frame, objects)
+        
+        return caption, objects_unique if 'objects_unique' in dir() else list(set(objects)), traffic_info, road_info, human_activities
+        
+    except Exception as e:
+        print(f"[Error capturing {direction}]: {e}")
+        return "", [], None, None, []
+
+
+def build_human_activity_summary(all_humans):
+    """Build a natural language summary of all detected human activities."""
+    if not all_humans:
+        return ""
+    
+    summary_parts = []
+    
+    # Group by direction
+    by_direction = {}
+    for human in all_humans:
+        direction = human.get('direction', 'nearby')
+        if direction not in by_direction:
+            by_direction[direction] = []
+        by_direction[direction].append(human)
+    
+    direction_phrases = {
+        'front': 'in front of you',
+        'left': 'on your left',
+        'right': 'on your right',
+        'back': 'behind you'
+    }
+    
+    for direction, humans in by_direction.items():
+        dir_phrase = direction_phrases.get(direction, direction)
+        
+        if len(humans) == 1:
+            h = humans[0]
+            activity = h.get('activity', 'present')
+            distance = h.get('distance', '')
+            motion = h.get('motion', '')
+            
+            if activity == 'sitting':
+                summary_parts.append(f"There's someone sitting {dir_phrase}")
+            elif activity == 'standing':
+                if motion == 'stationary':
+                    summary_parts.append(f"Someone is standing still {dir_phrase}")
+                else:
+                    summary_parts.append(f"Someone is standing {dir_phrase}")
+            elif activity == 'walking':
+                summary_parts.append(f"Someone is walking {dir_phrase}")
+            elif activity == 'running' or activity == 'running or walking quickly':
+                summary_parts.append(f"Someone appears to be running {dir_phrase}")
+            elif activity == 'lying down':
+                summary_parts.append(f"Someone is lying down {dir_phrase}")
+            elif activity == 'bending or reaching':
+                summary_parts.append(f"Someone is bending down {dir_phrase}")
+            else:
+                summary_parts.append(f"There's a person {dir_phrase}")
+            
+            if distance and distance != 'nearby':
+                summary_parts[-1] += f", {distance}"
+        
+        else:
+            # Multiple people
+            activities = [h.get('activity', 'present') for h in humans]
+            activity_counts = {}
+            for a in activities:
+                activity_counts[a] = activity_counts.get(a, 0) + 1
+            
+            parts = []
+            for activity, count in activity_counts.items():
+                if activity == 'sitting':
+                    parts.append(f"{count} sitting")
+                elif activity == 'standing':
+                    parts.append(f"{count} standing")
+                elif activity == 'walking':
+                    parts.append(f"{count} walking")
+                elif activity == 'running':
+                    parts.append(f"{count} running")
+                else:
+                    parts.append(f"{count} people")
+            
+            if parts:
+                summary_parts.append(f"There are {len(humans)} people {dir_phrase}: {', '.join(parts)}")
+    
+    if summary_parts:
+        return "About the people around you: " + ". ".join(summary_parts) + "."
+    return ""
+
+
+def build_comprehensive_description_enhanced(direction_data, is_indoor, is_outdoor):
+    """
+    Build a comprehensive natural language description from all captured directions.
+    Enhanced with directional object placement and human activities.
+    """
+    description_parts = []
+    
+    # Collect all objects
+    all_objects = []
+    for direction, data in direction_data.items():
+        all_objects.extend(data['objects'])
+    
+    # Determine environment type
+    if is_indoor and not is_outdoor:
+        # Indoor description
+        total_objects = len(set(all_objects))
+        if total_objects > 10:
+            room_size = "large"
+        elif total_objects > 5:
+            room_size = "medium-sized"
+        else:
+            room_size = "small"
+        
+        description_parts.append(f"You appear to be in a {room_size} indoor space.")
+        
+        # Front description
+        front_data = direction_data['front']
+        if front_data['objects']:
+            front_key_objects = [obj for obj in front_data['objects'] if obj not in ['person']]
+            if 'table' in front_key_objects or 'diningtable' in front_key_objects:
+                if 'laptop' in front_key_objects or 'computer' in front_key_objects:
+                    description_parts.append("Directly in front of you, there's a table with a computer.")
+                else:
+                    description_parts.append("Directly in front of you, there's a table.")
+            elif 'tvmonitor' in front_key_objects or 'tv' in front_key_objects:
+                description_parts.append("There's a TV or monitor in front of you.")
+            elif 'door' in front_key_objects:
+                description_parts.append("There's a door directly ahead.")
+            elif front_key_objects:
+                items = ", ".join(front_key_objects[:3])
+                description_parts.append(f"In front of you, I can see {items}.")
+        
+        # Left description
+        left_data = direction_data['left']
+        if left_data['objects']:
+            left_key_objects = [obj for obj in left_data['objects'] if obj not in ['person']]
+            if 'door' in left_key_objects:
+                description_parts.append("There's a door on your left.")
+            if 'window' in left_key_objects:
+                description_parts.append("There's a window on your left letting in some light.")
+            other_left = [obj for obj in left_key_objects if obj not in ['door', 'window']]
+            if other_left:
+                items = ", ".join(other_left[:2])
+                description_parts.append(f"On your left, there's also {items}.")
+        
+        # Right description
+        right_data = direction_data['right']
+        if right_data['objects']:
+            right_key_objects = [obj for obj in right_data['objects'] if obj not in ['person']]
+            if 'window' in right_key_objects:
+                description_parts.append("There's a window on your right.")
+            if 'door' in right_key_objects:
+                description_parts.append("There's a door on your right.")
+            other_right = [obj for obj in right_key_objects if obj not in ['door', 'window']]
+            if other_right:
+                items = ", ".join(other_right[:2])
+                description_parts.append(f"On your right, there's {items}.")
+        
+        # Back description
+        back_data = direction_data['back']
+        if back_data['objects']:
+            back_key_objects = [obj for obj in back_data['objects'] if obj not in ['person']]
+            if 'door' in back_key_objects:
+                description_parts.append("Behind you, there's a door.")
+            if 'bookshelf' in back_key_objects:
+                description_parts.append("There's a bookshelf behind you.")
+            if 'bed' in back_key_objects:
+                description_parts.append("There's a bed behind you.")
+            other_back = [obj for obj in back_key_objects if obj not in ['door', 'bookshelf', 'bed']]
+            if other_back:
+                items = ", ".join(other_back[:2])
+                description_parts.append(f"Behind you, there's also {items}.")
+    
+    else:
+        # Outdoor description
+        description_parts.append("You appear to be outdoors.")
+        
+        # Determine position
+        if any('sidewalk' in direction_data[d]['objects'] for d in direction_data):
+            description_parts.append("You're standing on a sidewalk.")
+        
+        # Check for road and traffic
+        front_data = direction_data['front']
+        road_objects = ['car', 'bus', 'truck', 'motorcycle', 'road']
+        
+        # Front
+        if front_data['objects']:
+            front_road_items = [obj for obj in front_data['objects'] if obj in road_objects]
+            front_other = [obj for obj in front_data['objects'] if obj not in road_objects and obj != 'person']
+            
+            if front_road_items:
+                if 'car' in front_road_items or 'bus' in front_road_items:
+                    vehicle_count = front_data['objects'].count('car') + front_data['objects'].count('bus') + front_data['objects'].count('truck')
+                    if vehicle_count > 3:
+                        description_parts.append("The road ahead looks busy with several vehicles.")
+                    elif vehicle_count > 0:
+                        description_parts.append("There are some vehicles on the road ahead.")
+            
+            if front_data['traffic']:
+                if front_data['traffic'] == 'red':
+                    description_parts.append("The traffic signal ahead is red, so please wait.")
+                elif front_data['traffic'] == 'green':
+                    description_parts.append("The traffic signal is green, you may proceed carefully.")
+            
+            if front_other:
+                items = ", ".join(front_other[:2])
+                description_parts.append(f"In front of you, there's {items}.")
+        
+        # Left
+        left_data = direction_data['left']
+        if left_data['objects']:
+            left_road_items = [obj for obj in left_data['objects'] if obj in road_objects]
+            left_other = [obj for obj in left_data['objects'] if obj not in road_objects and obj != 'person']
+            
+            if left_road_items:
+                description_parts.append("There's traffic on your left.")
+            if 'tree' in left_other:
+                description_parts.append("There's a tree on your left.")
+            elif left_other:
+                items = ", ".join(left_other[:2])
+                description_parts.append(f"On your left, there's {items}.")
+        
+        # Right
+        right_data = direction_data['right']
+        if right_data['objects']:
+            right_road_items = [obj for obj in right_data['objects'] if obj in road_objects]
+            right_other = [obj for obj in right_data['objects'] if obj not in road_objects and obj != 'person']
+            
+            if right_road_items:
+                description_parts.append("There's traffic on your right.")
+            if 'bench' in right_other:
+                description_parts.append("There's a bench on your right.")
+            elif right_other:
+                items = ", ".join(right_other[:2])
+                description_parts.append(f"On your right, there's {items}.")
+        
+        # Back
+        back_data = direction_data['back']
+        if back_data['objects']:
+            back_other = [obj for obj in back_data['objects'] if obj not in road_objects and obj != 'person']
+            if 'tree' in back_other:
+                description_parts.append("There's a tree behind you providing some shade.")
+            elif back_other:
+                items = ", ".join(back_other[:2])
+                description_parts.append(f"Behind you, there's {items}.")
+        
+        # Road condition summary
+        road_conditions = [direction_data[d]['road'] for d in direction_data if direction_data[d]['road']]
+        if road_conditions:
+            worst_condition = max(road_conditions, key=lambda x: ['empty', 'little busy', 'moderately busy', 'too crowded'].index(x) if x in ['empty', 'little busy', 'moderately busy', 'too crowded'] else 0)
+            if worst_condition == 'too crowded':
+                description_parts.append("Overall, the area seems quite crowded. Please be careful.")
+            elif worst_condition == 'empty':
+                description_parts.append("The area seems relatively quiet.")
+    
+    return " ".join(description_parts) if description_parts else "I've analyzed your surroundings but couldn't identify specific details. The area seems clear."
 
 
 def capture_and_analyze_direction(direction):
@@ -2196,7 +3377,7 @@ user_name = "friend"  # Default name, will be updated during system boot
 def speak_available_modes_overview():
     """Speak the list of available modes in a friendly tone."""
     speak(
-        "You can choose from assistant mode, navigation mode, object detection mode, walking mode, emergency mode, reading mode, security mode, medical mode, fire mode, and police mode."
+        "You can choose from assistant mode, navigation mode, object detection mode, walking mode, emergency mode, reading mode, bus detection mode, security mode, medical mode, fire mode, and police mode."
     )
 
 
@@ -4990,20 +6171,30 @@ def load_object_detection_model():
     models_dir = "models"
     os.makedirs(models_dir, exist_ok=True)
 
-    PROTOTXT_PATH = os.path.join(models_dir, "MobileNetSSD_deploy.prototxt")
-    MODEL_PATH = os.path.join(models_dir, "MobileNetSSD_deploy.caffemodel")
+    possible_proto = [
+        os.path.join(models_dir, "MobileNetSSD_deploy.prototxt"),
+        os.path.join(models_dir, "MobileNetSSD_deploy.prototxt.txt"),
+    ]
+    prototxt_path = next((path for path in possible_proto if os.path.exists(path)), None)
+    model_path = os.path.join(models_dir, "MobileNetSSD_deploy.caffemodel")
 
     # Skip download if both files are already there
-    if os.path.exists(PROTOTXT_PATH) and os.path.exists(MODEL_PATH):
+    if prototxt_path and os.path.exists(model_path):
         try:
-            net = cv2.dnn.readNetFromCaffe(PROTOTXT_PATH, MODEL_PATH)
+            net = cv2.dnn.readNetFromCaffe(prototxt_path, model_path)
             print("[Model] MobileNet-SSD loaded successfully.")
             return net
         except Exception as e:
             print(f"[Model load error] {e}")
             return None
     else:
-        print("Model files not found. Please download and place them in /models/")
+        missing = []
+        if not prototxt_path:
+            missing.append("MobileNetSSD_deploy.prototxt")
+        if not os.path.exists(model_path):
+            missing.append("MobileNetSSD_deploy.caffemodel")
+        missing_list = ", ".join(missing) if missing else "required model files"
+        print(f"Model files not found ({missing_list}). Please download and place them in /models/")
         return None
 
 
@@ -5305,33 +6496,33 @@ def system_boot():
     speak("First, Navigation Mode. Say 'Start navigation mode' or 'Navigation mode' to get step-by-step directions to any destination. I'll guide you using your camera and GPS, helping you avoid obstacles and find your way safely.")
     time.sleep(0.5)
     
-    speak("Second, Assistant Mode. Say 'Assistant mode' to ask me questions, check the time, weather, set reminders, or find nearby places like bus stops. I can help with everyday tasks.")
-    time.sleep(0.5)
+    # speak("Second, Assistant Mode. Say 'Assistant mode' to ask me questions, check the time, weather, set reminders, or find nearby places like bus stops. I can help with everyday tasks.")
+    # time.sleep(0.5)
     
-    speak("Third, Reading Mode. Say 'Reading mode' to have me read any printed or handwritten text through your camera. Just point the camera at the text, and I'll read it aloud to you.")
-    time.sleep(0.5)
+    # speak("Third, Reading Mode. Say 'Reading mode' to have me read any printed or handwritten text through your camera. Just point the camera at the text, and I'll read it aloud to you.")
+    # time.sleep(0.5)
     
-    speak("Fourth, Object Detection Mode. Say 'Object detection mode' to have me describe what's around you. I'll tell you about objects, people, doors, walls, and obstacles in your path.")
-    time.sleep(0.5)
+    # speak("Fourth, Object Detection Mode. Say 'Object detection mode' to have me describe what's around you. I'll tell you about objects, people, doors, walls, and obstacles in your path.")
+    # time.sleep(0.5)
     
-    speak("Fifth, Walking Mode. Say 'Walking mode' for real-time guidance while walking. I'll continuously monitor your path and warn you about obstacles, doors, and walls ahead.")
-    time.sleep(0.5)
+    # speak("Fifth, Walking Mode. Say 'Walking mode' for real-time guidance while walking. I'll continuously monitor your path and warn you about obstacles, doors, and walls ahead.")
+    # time.sleep(0.5)
     
-    # Emergency features
-    speak(f"Important safety features, {user_name}:")
-    time.sleep(0.3)
+    # # Emergency features
+    # speak(f"Important safety features, {user_name}:")
+    # time.sleep(0.3)
     
-    speak("If you need emergency help, say 'Emergency mode' or 'Help me' and I'll activate emergency assistance immediately.")
-    time.sleep(0.3)
+    # speak("If you need emergency help, say 'Emergency mode' or 'Help me' and I'll activate emergency assistance immediately.")
+    # time.sleep(0.3)
     
-    speak("For medical emergencies, say 'Medical mode' or 'Call medical service'.")
-    time.sleep(0.3)
+    # speak("For medical emergencies, say 'Medical mode' or 'Call medical service'.")
+    # time.sleep(0.3)
     
-    speak("For police assistance, say 'Police mode' or 'Call police service'.")
-    time.sleep(0.3)
+    # speak("For police assistance, say 'Police mode' or 'Call police service'.")
+    # time.sleep(0.3)
     
-    speak("For fire emergencies, say 'Fire mode' or 'Call fire service'.")
-    time.sleep(0.5)
+    # speak("For fire emergencies, say 'Fire mode' or 'Call fire service'.")
+    # time.sleep(0.5)
     
     # How to use tips
     speak(f"Here are some helpful tips for using me, {user_name}:")
@@ -6421,6 +7612,31 @@ def select_mode():
         ):
             speak("Reading mode activated. I can help you read text or documents.")
             run_reading_mode()
+
+        # ---------------- BUS DETECTION MODE ----------------
+        elif (
+            "bus" in mode_input or
+            "bus detection" in mode_input or
+            "bus mode" in mode_input or
+            "detect bus" in mode_input or
+            "find bus" in mode_input or
+            "bus number" in mode_input or
+            "which bus" in mode_input or
+            "bus route" in mode_input or
+            "start bus detection" in mode_input or
+            "activate bus mode" in mode_input or
+            "enable bus detection" in mode_input or
+            "scan for bus" in mode_input or
+            "check bus" in mode_input or
+            "identify bus" in mode_input or
+            "read bus number" in mode_input or
+            "what bus is this" in mode_input or
+            "tell me about the bus" in mode_input or
+            "public transport" in mode_input or
+            "i need a bus" in mode_input
+        ):
+            speak("Bus Detection Mode activated. I will detect buses and tell you their numbers and routes.")
+            run_bus_detection_mode(speak)
 
         # ---------------- EXIT / QUIT ----------------
         elif (

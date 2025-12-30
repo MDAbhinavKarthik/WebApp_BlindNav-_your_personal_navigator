@@ -1,0 +1,77 @@
+{
+  "routes": {
+    "101": {
+      "number": "101",
+      "route": "City Center to Airport Terminal",
+      "stops": ["City Center", "Main Street", "Shopping Mall", "Hospital", "Airport Terminal"],
+      "frequency": "Every 15 minutes",
+      "operating_hours": "5:00 AM - 11:00 PM"
+    },
+    "102": {
+      "number": "102",
+      "route": "Downtown to University Campus",
+      "stops": ["Downtown Station", "Library", "Park Avenue", "University Main Gate", "Engineering Block"],
+      "frequency": "Every 20 minutes",
+      "operating_hours": "6:00 AM - 10:00 PM"
+    },
+    "103": {
+      "number": "103",
+      "route": "Railway Station to Bus Stand",
+      "stops": ["Railway Station", "Market Square", "Government Office", "Bus Stand"],
+      "frequency": "Every 10 minutes",
+      "operating_hours": "4:00 AM - 12:00 AM"
+    },
+    "104": {
+      "number": "104",
+      "route": "Residential Area to Industrial Zone",
+      "stops": ["Residential Complex", "School", "Community Center", "Industrial Zone"],
+      "frequency": "Every 30 minutes",
+      "operating_hours": "6:00 AM - 9:00 PM"
+    },
+    "105": {
+      "number": "105",
+      "route": "Hospital to Shopping District",
+      "stops": ["General Hospital", "Medical College", "Shopping Mall", "Entertainment Zone"],
+      "frequency": "Every 25 minutes",
+      "operating_hours": "7:00 AM - 11:00 PM"
+    },
+    "201": {
+      "number": "201",
+      "route": "Suburban Loop",
+      "stops": ["Suburban Station", "Residential Area 1", "Residential Area 2", "Shopping Center", "Suburban Station"],
+      "frequency": "Every 40 minutes",
+      "operating_hours": "5:30 AM - 10:30 PM"
+    },
+    "202": {
+      "number": "202",
+      "route": "Express to Airport",
+      "stops": ["City Center", "Highway Junction", "Airport Terminal"],
+      "frequency": "Every 30 minutes",
+      "operating_hours": "24/7"
+    },
+    "301": {
+      "number": "301",
+      "route": "Beach Route",
+      "stops": ["City Center", "Beach Road", "Marina", "Lighthouse"],
+      "frequency": "Every 45 minutes",
+      "operating_hours": "6:00 AM - 9:00 PM"
+    },
+    "401": {
+      "number": "401",
+      "route": "Night Service",
+      "stops": ["Downtown", "Railway Station", "Airport", "Hospital"],
+      "frequency": "Every 60 minutes",
+      "operating_hours": "10:00 PM - 5:00 AM"
+    },
+    "501": {
+      "number": "501",
+      "route": "Educational Institutions Circuit",
+      "stops": ["School 1", "School 2", "College", "University", "Library"],
+      "frequency": "Every 35 minutes",
+      "operating_hours": "7:00 AM - 6:00 PM"
+    }
+  },
+  "default_message": "Bus route information not available in database. Please check with the bus operator."
+}
+
+
