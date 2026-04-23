@@ -1,0 +1,2604 @@
+# personal_navigator_resilient.py
+import cv2
+import numpy as np
+import time
+import threading
+import queue
+import socket
+import json
+from collections import deque
+import os
+import sys
+from pathlib import Path
+import tkinter as tk
+from tkinter import ttk
+import pygame
+import shutil
+
+
+# Import our enhanced components
+from utils.system_state import SystemState
+from utils.task_manager import TaskManager, TaskPriority, TaskState
+from utils.intent_router import IntentRouter, Intent, IntentType
+from utils.voice_io import EnhancedVoiceIO, ResponseType
+
+# Add src to Python path if needed
+src_dir = Path(__file__).parent
+if src_dir.name == "src":
+    sys.path.append(str(src_dir))
+
+from llm_phi3 import Phi3Assistant
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+from audio_utils import MusicPlayer
+from audio_manager import AudioManager
+from tutorial_manager import TutorialManager
+from audio_utils import MusicPlayer
+
+# Set up paths relative to src directory
+MODELS_DIR = os.path.join(os.path.dirname(src_dir), "models")
+DATA_DIR = os.path.join(os.path.dirname(src_dir), "data")
+
+# Classes and labels
+TERRAIN_CLASSES = [
+    "stairs", "ramp", "slope", "curb", "sidewalk", "pavement",
+    "grass", "dirt", "gravel", "sand", "puddle", "ice",
+    "snow", "wet", "slippery"
+]
+
+SURFACE_CLASSES = [
+    "asphalt", "concrete", "tile", "wood", "metal", "carpet",
+    "rough", "smooth", "uneven", "bumpy", "cracked"
+]
+YOLO_MODEL_PATH = str(Path(MODELS_DIR) / "yolov8n.pt")
+
+
+# optional libs
+try:
+    import pytesseract
+    # Try to get tesseract version to verify it's working
+    try:
+        pytesseract.get_tesseract_version()
+        OCR_AVAILABLE = True
+        print("[OCR] Tesseract OCR engine initialized successfully")
+    except Exception as e:
+        # Try to find tesseract executable in common locations
+        pass
+    tesseract_path = shutil.which("tesseract")
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        pytesseract.get_tesseract_version()
+        OCR_AVAILABLE = True
+        print("[OCR] Tesseract OCR engine initialized successfully")
+    else:
+        raise FileNotFoundError("Tesseract executable not found in PATH.")
+except Exception as e:
+    print(f"[OCR] Tesseract not available: {e}")
+    print("[OCR] To enable OCR, install Tesseract and pytesseract:")
+    print("[OCR] 1. Download Tesseract: https://github.com/UB-Mannheim/tesseract/wiki")
+    print("[OCR] 2. Install pytesseract: pip install pytesseract")
+    OCR_AVAILABLE = False
+
+try:
+    import pyttsx3
+    TTS_AVAILABLE = True
+except Exception as e:
+    TTS_AVAILABLE = False
+    print("[TTS] Text-to-speech engine is NOT available! All speech will be printed ONLY.\nError:", e)
+    try:
+        import platform
+        if platform.system() == "Windows":
+            import winsound
+            winsound.MessageBeep()
+    except Exception:
+        pass
+
+try:
+    import speech_recognition as sr
+    SR_AVAILABLE = True
+except Exception:
+    SR_AVAILABLE = False
+
+# ultralytics / tensorflow are optional depending on config
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except Exception:
+    YOLO_AVAILABLE = False
+
+try:
+    import tensorflow as tf
+    import tensorflow_hub as hub
+    TF_AVAILABLE = True
+except Exception:
+    TF_AVAILABLE = False
+
+# -------------------- Config --------------------
+LANGUAGES = {
+    "english": "en",
+    "hindi": "hi",
+    "kannada": "kn"
+}
+
+TRANSPORT_MODES = ["walking", "bus", "train", "metro", "auto", "taxi"]
+
+OBSTACLES = ["chair", "table", "sofa", "wall", "stairs", "door", "bench", "pole"]
+EMERGENCIES = ["knife", "fire", "person_falling"]
+STREET_CLASSES = [
+    "person", "car", "bus", "truck", "bicycle", "motorcycle",
+    "traffic light", "stop sign", "fire hydrant", "bench", "dog"
+]
+
+MODE_KEYWORDS = {
+    "walking": ["walking", "walk"],
+    "navigation": ["navigation", "navigate", "directions", "route"],
+    "reading": ["reading", "read", "ocr"],
+    "object_scene": ["object", "scene", "around", "surroundings"],
+    "assistant": ["assistant", "utility", "help", "smart"]
+}
+
+HOTWORDS_SOS = ["help", "sos", "emergency"]
+
+# -------------------- Utility --------------------
+def has_internet(host="8.8.8.8", port=53, timeout=2):
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except Exception:
+        return False
+
+# -------------------- Multilingual TTS --------------------
+class MultilingualTTS:
+    """Offline-first TTS using pyttsx3 when available. Falls back to print()."""
+    
+    _instance_lock = threading.Lock()
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, lang="en"):
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super(MultilingualTTS, cls).__new__(cls)
+            return cls._instance
+    
+    def __init__(self, lang="en"):
+        if self._initialized:
+            return
+            
+        with self._instance_lock:
+            if not self._initialized:
+                self.lang = lang
+                self._use_engine = TTS_AVAILABLE
+                self.queue = queue.Queue()
+                self._stop_flag = threading.Event()
+                self.rate = 175  # Default speaking rate (can be adjusted)
+                self.volume = 0.9  # Default volume (0.0 to 1.0)
+                
+                if self._use_engine:
+                    try:
+                        self.engine = pyttsx3.init()
+                        self._set_voice(lang)
+                        self._configure_engine()
+                        # background thread processes queued non-blocking speech
+                        self.thread = threading.Thread(target=self._loop, daemon=True)
+                        self.thread.start()
+                        # Test the engine silently (no speech during initialization)
+                        # self.speak_blocking("Screen reader initialized.", fallback_print=False)
+                        self._initialized = True
+                        print("[TTS] Text-to-speech engine initialized successfully")
+                        # Test: speak success line after full init
+                        self.engine.say("Speech synthesis is working.")
+                        self.engine.runAndWait()
+                    except Exception as e:
+                        self._use_engine = False
+                        print(f"[TTS] pyttsx3 failed to initialize: {e} -> falling back to print()")
+                        print("[TTS] To enable voice, please ensure pyttsx3 is installed: pip install pyttsx3")
+                        try:
+                            import platform
+                            if platform.system() == "Windows":
+                                import winsound
+                                winsound.MessageBeep()
+                        except Exception:
+                            pass
+                    print("[TTS] To enable voice, please ensure pyttsx3 is installed: pip install pyttsx3")
+                else:
+                    print("[TTS] pyttsx3 not available -> using print fallback")
+                    print("[TTS] To enable voice, please install pyttsx3: pip install pyttsx3")
+                    try:
+                        import platform
+                        if platform.system() == "Windows":
+                            import winsound
+                            winsound.MessageBeep()
+                    except Exception:
+                        pass
+
+    def _configure_engine(self):
+        """Configure TTS engine properties."""
+        if not self._use_engine:
+            return
+        try:
+            self.engine.setProperty('rate', self.rate)
+            self.engine.setProperty('volume', self.volume)
+        except Exception as e:
+            print(f"[TTS] Warning: Could not configure engine properties: {e}")
+
+    def _set_voice(self, lang):
+        """Set the voice based on language preference with improved matching."""
+        if not self._use_engine:
+            return
+
+        try:
+            voices = self.engine.getProperty('voices')
+            if not voices:
+                print("[TTS] No voices available")
+                return "default voice"
+
+            # Define language mappings and alternatives
+            lang_mappings = {
+                "hi": ["hindi", "hi", "hi-in", "ind"],
+                "kn": ["kannada", "kn", "kn-in", "kan"],
+                "en": ["english", "en", "en-us", "en-gb", "eng"]
+            }
+
+            # Get possible matches for the requested language
+            target_patterns = lang_mappings.get(lang.lower(), [lang.lower()])
+            
+            # Score each voice for suitability
+            voice_scores = []
+            for v in voices:
+                score = 0
+                name_lower = v.name.lower()
+                
+                # Check voice name and properties
+                for pattern in target_patterns:
+                    if pattern in name_lower:
+                        score += 2
+                    if hasattr(v, 'languages') and any(pattern in lang.lower() for lang in v.languages):
+                        score += 2
+                
+                # Extra points for matching language code
+                if hasattr(v, 'id') and lang.lower() in v.id.lower():
+                    score += 1
+                
+                # Prefer Microsoft voices over SAPI voices for better quality
+                if "microsoft" in name_lower:
+                    score += 1
+                
+                voice_scores.append((v, score))
+            
+            # Sort by score and get the best match
+            voice_scores.sort(key=lambda x: x[1], reverse=True)
+            best_match = voice_scores[0][0] if voice_scores else voices[0]
+            
+            # Configure voice properties
+            self.engine.setProperty('voice', best_match.id)
+            
+            # Adjust rate and properties based on language
+            if lang != "en":
+                # Slower rate for non-English languages for better clarity
+                self.engine.setProperty('rate', self.rate * 0.9)
+            else:
+                self.engine.setProperty('rate', self.rate)
+            
+            name = best_match.name
+            print(f"[TTS] Selected voice: {name} for language: {lang}")
+            # print(f"[TTS] Voice properties: Rate={self.engine.getProperty('rate')}, Volume={self.engine.getProperty('volume')}")
+            
+            return name
+            
+        except Exception as e:
+            print(f"[TTS] Warning: Could not set voice: {e}")
+            print("[TTS] Falling back to default voice")
+            return "default voice"
+
+    def set_lang(self, lang):
+        """Change the language and voice with proper synchronization."""
+        if not self._use_engine:
+            print(f"[TTS] Language changed to {lang} (text-only mode)")
+            return
+
+        prev_lang = self.lang
+        self.lang = lang
+        
+        # Ensure queue is empty before changing voice
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+                self.queue.task_done()
+            except Exception:
+                pass
+                
+        try:
+            voice_name = self._set_voice(lang)
+            
+            # Prepare confirmation message
+            confirmations = {
+                "en": "English selected",
+                "hi": "हिंदी चुनी गई",
+                "kn": "ಕನ್ನಡ ಆಯ್ಕೆಯಾಗಿದೆ"
+            }
+            
+            # Wait for previous speech to finish
+            time.sleep(0.5)
+            
+            # Speak confirmation in the new language
+            self.speak_blocking(confirmations.get(lang, confirmations["en"]), 
+                             fallback_print=True)
+            
+            return True
+            
+        except Exception as e:
+            print(f"[TTS] Error during language switch: {e}")
+            self.speak_blocking("Error changing language", fallback_print=True)
+            return False
+        
+    def set_rate(self, rate):
+        """Adjust speaking rate (words per minute)."""
+        self.rate = max(50, min(400, rate))  # Clamp between 50-400 WPM
+        if self._use_engine:
+            try:
+                self.engine.setProperty('rate', self.rate)
+                self.speak(f"Speaking rate set to {self.rate} words per minute")
+            except Exception as e:
+                print(f"[TTS] Could not set rate: {e}")
+
+    def set_volume(self, volume):
+        """Adjust speaking volume (0.0 to 1.0)."""
+        self.volume = max(0.0, min(1.0, volume))
+        if self._use_engine:
+            try:
+                self.engine.setProperty('volume', self.volume)
+                self.speak(f"Volume set to {int(self.volume * 100)} percent")
+            except Exception as e:
+                print(f"[TTS] Could not set volume: {e}")
+
+    def _loop(self):
+        while not self._stop_flag.is_set():
+            try:
+                text = self.queue.get(timeout=0.5)
+            except Exception:
+                continue
+            if text is None:
+                break
+            try:
+                if self._use_engine:
+                    # Check if engine is already running
+                    if hasattr(self.engine, '_inLoop') and self.engine._inLoop:
+                        # Engine is busy, skip this text
+                        print(f"[TTS] Engine busy, skipping: {text[:50]}...")
+                        continue
+                    
+                    self.engine.say(text)
+                    self.engine.runAndWait()
+                else:
+                    print("[TTS]", text)
+            except Exception as e:
+                print(f"[TTS] error: {e}")
+                # If engine is in a bad state, try to reinitialize
+                if "run loop already started" in str(e):
+                    try:
+                        self.engine.stop()
+                        time.sleep(0.1)
+                    except:
+                        pass
+            finally:
+                try:
+                    self.queue.task_done()
+                except Exception:
+                    pass
+
+    def speak(self, text, message_type="info"):
+        """
+        Non-blocking speak — queued.
+        message_type can be: "info", "warning", "error", "success"
+        """
+        if not text:
+            return
+
+        # Format message based on type
+        prefix = ""
+        if message_type == "warning":
+            prefix = "Warning: "
+        elif message_type == "error":
+            prefix = "Error: "
+        elif message_type == "success":
+            prefix = "Success: "
+        
+        full_text = prefix + text
+        
+        # Dim background music before speaking
+        if hasattr(self, 'audio_manager') and hasattr(self.audio_manager, '_music_player'):
+            self.audio_manager._music_player.dim()
+        
+        if self._use_engine:
+            self.queue.put(full_text)
+        else:
+            tag = f"[TTS/{message_type.upper()}]"
+            print(f"{tag} {text}")
+            
+        # Schedule music volume restoration after speech
+        if hasattr(self, 'audio_manager') and hasattr(self.audio_manager, '_music_player'):
+            threading.Timer(len(text) * 0.1 + 0.5, self.audio_manager._music_player.restore).start()
+            
+    def speak_blocking(self, text, message_type="info", fallback_print=True, urgent=False):
+        """
+        Ensure text is spoken (blocking). Useful before listen() calls.
+        message_type can be: "info", "warning", "error", "success"
+        urgent=True will increase volume temporarily for important messages
+        """
+        if not text:
+            return
+            
+        # Format message based on type
+        prefix = ""
+        if message_type == "warning":
+            prefix = "Warning: "
+        elif message_type == "error":
+            prefix = "Error: "
+        elif message_type == "success":
+            prefix = "Success: "
+            
+        full_text = prefix + text
+        
+        # Dim background music before speaking
+        if hasattr(self, 'audio_manager') and hasattr(self.audio_manager, '_music_player'):
+            self.audio_manager._music_player.dim()
+        
+        if self._use_engine:
+            try:
+                # Temporarily boost volume for urgent messages
+                original_volume = None
+                if urgent and self._use_engine:
+                    try:
+                        original_volume = self.engine.getProperty('volume')
+                        self.engine.setProperty('volume', min(1.0, original_volume * 1.5))
+                    except Exception:
+                        pass
+                
+                # Use queue for blocking speech to avoid runAndWait conflicts
+                self.queue.put(full_text)
+                
+                # Wait for the speech to complete
+                import time
+                start_time = time.time()
+                while not self.queue.empty() and (time.time() - start_time) < 10:  # 10 second timeout
+                    time.sleep(0.1)
+                
+                # Restore original volume
+                if original_volume is not None:
+                    try:
+                        self.engine.setProperty('volume', original_volume)
+                    except Exception:
+                        pass
+                        
+            except Exception as e:
+                print(f"[TTS] Engine error: {e}")
+                if fallback_print:
+                    tag = f"[TTS/{message_type.upper()}]"
+                    print(f"{tag} {text}")
+        else:
+            if fallback_print:
+                tag = f"[TTS/{message_type.upper()}]"
+                print(f"{tag} {text}")
+                
+        # Restore background music volume after speaking
+        if hasattr(self, 'audio_manager') and hasattr(self.audio_manager, '_music_player'):
+            self.audio_manager._music_player.restore()
+
+    def stop(self):
+        if self._use_engine:
+            self._stop_flag.set()
+            self.queue.put(None)
+            if hasattr(self, '_engine'):
+                try:
+                    self._engine.stop()
+                except Exception:
+                    pass
+            # Clear the queue
+            while not self.queue.empty():
+                try:
+                    self.queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def speak_direct_blocking(self, text):
+        if self._use_engine:
+            self.engine.say(text)
+            self.engine.runAndWait()
+        else:
+            print(text)
+
+# -------------------- Voice I/O --------------------
+class VoiceIO:
+    def __init__(self, lang="en", audio_manager=None):
+        self.lang = lang
+        self.recognizer = None
+        self.mic_available = False
+        self.audio_manager = audio_manager
+        if SR_AVAILABLE:
+            try:
+                self.recognizer = sr.Recognizer()
+                # Try to find a suitable microphone, preferring Realtek arrays
+                mics = sr.Microphone.list_microphone_names()
+                mic_index = None
+                for i, name in enumerate(mics):
+                    if "Microphone Array" in name:
+                        mic_index = i
+                        # Using microphone - voice-only interface
+                        break
+                
+                if mic_index is not None:
+                    self.microphone = sr.Microphone(device_index=mic_index)
+                else:
+                    self.microphone = sr.Microphone()
+                    # Using default microphone - voice-only interface
+                
+                # Test the microphone
+                with self.microphone as source:
+                    self.recognizer.adjust_for_ambient_noise(source, duration=1)
+                self.mic_available = True
+                # Microphone initialized successfully - voice-only interface
+            except Exception as e:
+                # microphone not accessible; fallback to text input
+                self.microphone = None
+                self.mic_available = False
+                # Microphone setup failed - voice-only interface
+                # Falling back to typed input
+        else:
+            # speech_recognition not available, falling back to typed input - voice-only interface
+            pass
+
+    def set_lang(self, lang):
+        """Set the recognition language with appropriate variants."""
+        self.lang = lang
+        # Reset recognizer to clear any cached settings
+        if self.recognizer:
+            self.recognizer = sr.Recognizer()
+            # Adjust recognition parameters for different languages
+            if lang != "en":
+                # More lenient recognition for non-English
+                self.recognizer.operation_timeout = 30  # Increased timeout
+                self.recognizer.pause_threshold = 1.0   # More time between phrases
+            else:
+                # Default settings for English
+                self.recognizer.operation_timeout = 20
+                self.recognizer.pause_threshold = 0.8
+
+    def listen(self, timeout=7, phrase_time_limit=None, prompt=None, max_retries=2):
+        """
+        Try to listen via microphone. If not available or recognition fails,
+        fallback to typed input for debugging/testing.
+        Returns lowercase string or None.
+        """
+        if not (self.mic_available and self.recognizer and self.microphone):
+            return self._typed_input_fallback(prompt)
+            
+        if prompt:
+            print("[Listening prompt]:", prompt)
+        
+        # Dim background music before listening
+        if hasattr(self, 'audio_manager'):
+            self.audio_manager.dim_background_music()
+        
+        retries = 0
+        try:
+            while retries <= max_retries:
+                try:
+                    with self.microphone as source:
+                        # Enhanced ambient noise adjustment for multilingual support
+                        if self.lang == "kn":  # Kannada needs more adjustment
+                            noise_duration = 2.0
+                            self.recognizer.energy_threshold = 5000  # More sensitive for Kannada
+                        elif self.lang == "hi":  # Hindi needs moderate adjustment
+                            noise_duration = 1.8
+                            self.recognizer.energy_threshold = 4500  # Moderate sensitivity for Hindi
+                        else:  # English
+                            noise_duration = 0.5
+                            self.recognizer.energy_threshold = 3000
+                        
+                        self.recognizer.adjust_for_ambient_noise(source, duration=noise_duration)
+                        # Additional settings for better multilingual recognition
+                        self.recognizer.dynamic_energy_threshold = True
+                        self.recognizer.pause_threshold = 1.0 if self.lang != "en" else 0.8
+                        # Voice-only interface - no console output
+                        
+                        try:
+                            # Enhanced timeout for multilingual support
+                            if self.lang == "kn":  # Kannada needs more time
+                                actual_timeout = timeout * 2.0
+                            elif self.lang == "hi":  # Hindi needs moderate extra time
+                                actual_timeout = timeout * 1.8
+                            else:  # English
+                                actual_timeout = timeout
+                            audio = self.recognizer.listen(source, timeout=actual_timeout, 
+                                                         phrase_time_limit=phrase_time_limit)
+                        except sr.WaitTimeoutError:
+                            # No speech detected - voice-only interface
+                            retries += 1
+                            continue
+                        
+                        try:
+                            # Enhanced multilingual recognition with multiple engines
+                            text = None
+                            errors = []
+                            
+                            # Define language mappings for better recognition
+                            language_mappings = {
+                                "en": ["en-US", "en-GB", "en"],
+                                "hi": ["hi-IN", "hi", "hi-Latn", "en-IN"],  # Hindi with English fallback
+                                "kn": ["kn-IN", "kn", "kn-Latn", "en-IN"]   # Kannada with English fallback
+                            }
+                            
+                            # Get language variants for current language
+                            languages = language_mappings.get(self.lang, ["en-US"])
+                            
+                            # Try multiple recognition engines for better accuracy
+                            recognition_engines = [
+                                ("Google", self._recognize_google),
+                                ("Sphinx", self._recognize_sphinx),
+                                ("Azure", self._recognize_azure)
+                            ]
+                            
+                            for engine_name, engine_func in recognition_engines:
+                                for lang in languages:
+                                    try:
+                                        text = engine_func(audio, lang)
+                                        if text and len(text.strip()) > 0:
+                                            # Voice recognition successful - voice-only interface
+                                            return text.lower()
+                                    except Exception as e:
+                                        pass
+                            
+                            if not text:
+                                # Recognition failed - voice-only interface
+                                
+                                # Try English as final fallback for non-English languages
+                                if self.lang != "en":
+                                    try:
+                                        text = self.recognizer.recognize_google(audio, language="en-US")
+                                        if text:
+                                            # English fallback successful - voice-only interface
+                                            return text.lower()
+                                    except Exception:
+                                        pass
+                        except Exception as e:
+                                        # English fallback failed - voice-only interface
+                                        pass
+                        except Exception as e:
+                            # Recognition error - voice-only interface
+                            # Network error - go straight to fallback
+                            break
+                except Exception as e:
+                    # Microphone error - voice-only interface
+                    break
+                
+                retries += 1
+                if retries <= max_retries:
+                    # Retrying recognition - voice-only interface
+                    pass
+            
+            # Falling back to typed input - voice-only interface
+            return self._typed_input_fallback(prompt)
+        finally:
+            # Restore background music volume after listening attempt
+            if hasattr(self, 'audio_manager'):
+                self.audio_manager.restore_background_music()
+
+    def _recognize_google(self, audio, language):
+        """Google Speech Recognition with enhanced error handling."""
+        try:
+            return self.recognizer.recognize_google(audio, language=language)
+        except (sr.UnknownValueError, sr.RequestError) as e:
+            raise Exception(f"Google recognition failed: {e}")
+    
+    def _recognize_sphinx(self, audio, language):
+        """PocketSphinx recognition for offline support."""
+        try:
+            # PocketSphinx has limited language support, use English for fallback
+            if language not in ["en-US", "en-GB", "en"]:
+                language = "en-US"
+            return self.recognizer.recognize_sphinx(audio, language=language)
+        except Exception as e:
+            raise Exception(f"Sphinx recognition failed: {e}")
+    
+    def _recognize_azure(self, audio, language):
+        """Azure Speech Recognition (if available)."""
+        try:
+            # Azure recognition would require API key setup
+            # For now, fallback to Google
+            return self.recognizer.recognize_google(audio, language=language)
+        except Exception as e:
+            raise Exception(f"Azure recognition failed: {e}")
+
+    @staticmethod
+    def _typed_input_fallback(prompt=None):
+        try:
+            if prompt:
+                reply = input(f"(typed fallback) {prompt}\n> ")
+            else:
+                reply = input("(typed fallback) Speak or type command:\n> ")
+            return reply.strip().lower() if reply else None
+        except Exception:
+            return None
+
+# -------------------- Intent Parsing --------------------
+class IntentRouter:
+    def parse_intent(self, text):
+        """Parse user intent from text input."""
+        if not text:
+            return None
+        
+        # Check for mode requests
+        mode = self.detect_mode_request(text)
+        if mode:
+            return {"type": "mode_change", "mode": mode}
+        
+        # Check for other intents
+        if any(word in text.lower() for word in ["help", "what can you do", "commands"]):
+            return {"type": "help"}
+        
+        if any(word in text.lower() for word in ["stop", "exit", "quit"]):
+            return {"type": "stop"}
+        
+        # Default to general command
+        return {"type": "general", "text": text}
+    
+    def detect_mode_request(self, text):
+        if not text:
+            return None
+        for mode, keys in MODE_KEYWORDS.items():
+            for k in keys:
+                if k in text:
+                    return mode
+        return None
+
+    def wants_context_switch(self, text):
+        return (text and ("switch to" in text or "change to" in text or "go to" in text))
+
+    def extract_mode_from_switch(self, text):
+        if not text:
+            return None
+        return self.detect_mode_request(text)
+
+    def is_where_am_i(self, text):
+        return text and ("where am i" in text or "current location" in text)
+
+    def is_read_command(self, text):
+        return text and ("read" in text or "ocr" in text)
+
+    def is_assistant_query(self, text):
+        return text and any(k in text for k in ["weather", "reminder", "calendar", "search", "message", "call", "time"])
+
+    def is_sos(self, text):
+        return text and any(hw in text for hw in HOTWORDS_SOS)
+
+# -------------------- Detector --------------------
+class Detector:
+    def __init__(self, detector_type="yolo", model_path="yolov8n.pt"):
+        self.detector_type = detector_type.lower()
+        self.model = None
+        self.labels = {}
+        if self.detector_type == "yolo":
+            if YOLO_AVAILABLE:
+                try:
+                    from ultralytics import YOLO
+                    # Convert model_path to string if it's a Path object
+                    model_path = str(model_path)
+                    self.model = YOLO(model_path)
+                except Exception as e:
+                    print("[Detector] YOLO model load failed:", e)
+                    print("[Detector] Continuing without object detection")
+                    self.model = None
+            else:
+                print("[Detector] ultralytics YOLO not available. Detection disabled.")
+        elif self.detector_type == "efficientdet":
+            if TF_AVAILABLE:
+                try:
+                    self.model = hub.load("https://tfhub.dev/tensorflow/efficientdet/lite0/detection/1")
+                    labels_url = "https://storage.googleapis.com/openimages/v5/class-descriptions-boxable.csv"
+                    labels_path = tf.keras.utils.get_file("class-descriptions-boxable.csv", labels_url)
+                    with open(labels_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            cid, name = line.strip().split(",")
+                            self.labels[cid] = name
+                except Exception as e:
+                    print("[Detector] EfficientDet load failed:", e)
+                    self.model = None
+            else:
+                print("[Detector] TensorFlow/TensorFlow-Hub not available. Detection disabled.")
+        else:
+            raise ValueError("Invalid detector type. Use 'yolo' or 'efficientdet'.")
+
+    @staticmethod
+    def get_position(x, y, box_w, box_h, frame_w, frame_h):
+        """Get detailed position information including distance estimation."""
+        # Horizontal position (9 zones for more precision)
+        if x < frame_w / 4:
+            horizontal = "far left"
+        elif x < frame_w / 3:
+            horizontal = "left"
+        elif x < frame_w * 5/12:
+            horizontal = "center left"
+        elif x < frame_w * 7/12:
+            horizontal = "center"
+        elif x < frame_w * 2/3:
+            horizontal = "center right"
+        elif x < frame_w * 3/4:
+            horizontal = "right"
+        else:
+            horizontal = "far right"
+        
+        # Vertical position
+        if y < frame_h / 3:
+            vertical = "high"
+        elif y < frame_h * 2/3:
+            vertical = "level"
+        else:
+            vertical = "low"
+        
+        # Estimate distance based on box size relative to frame
+        box_area = box_w * box_h
+        frame_area = frame_w * frame_h
+        area_ratio = box_area / frame_area
+        
+        if area_ratio > 0.4:
+            distance = "very close"
+        elif area_ratio > 0.2:
+            distance = "close"
+        elif area_ratio > 0.1:
+            distance = "nearby"
+        elif area_ratio > 0.05:
+            distance = "moderate distance"
+        elif area_ratio > 0.02:
+            distance = "far"
+        else:
+            distance = "very far"
+            
+        # Combine position info
+        position = f"{distance}, {horizontal}"
+        if vertical != "level":
+            position += f", {vertical}"
+            
+        return position, area_ratio
+
+    def detect(self, frame):
+        detections = []
+        if frame is None:
+            return detections
+        frame_h, frame_w = frame.shape[:2]
+        if self.detector_type == "yolo" and self.model:
+            try:
+                results = self.model(frame, verbose=False)
+                r = results[0]
+                # ultralytics result API compatibility
+                boxes = getattr(r, "boxes", [])
+                for box in boxes:
+                    cls_id = int(box.cls[0]) if hasattr(box.cls, "__len__") else int(box.cls)
+                    score = float(box.conf[0]) if hasattr(box.conf, "__len__") else float(box.conf)
+                    label = self.model.names.get(cls_id, "unknown").lower()
+                    xy = box.xyxy[0] if hasattr(box.xyxy, "__len__") else box.xyxy
+                    x1, y1, x2, y2 = map(int, xy)
+                    box_w, box_h = x2 - x1, y2 - y1
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    position, area_ratio = self.get_position(cx, cy, box_w, box_h, frame_w, frame_h)
+                    detections.append({
+                        "label": label,
+                        "pos": position,
+                        "box": (x1, y1, x2, y2),
+                        "score": score,
+                        "area_ratio": area_ratio,
+                        "center": (cx, cy)
+                    })
+            except Exception as e:
+                # if detection errors occur, keep going
+                print("[Detector] YOLO detect error:", e)
+        elif self.detector_type == "efficientdet" and self.model:
+            try:
+                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img_tensor = tf.convert_to_tensor(img_rgb, dtype=tf.uint8)[tf.newaxis, ...]
+                result = self.model(img_tensor)
+                result = {k: v.numpy() for k, v in result.items()}
+                for i in range(len(result["detection_scores"])):
+                    score = float(result["detection_scores"][i])
+                    if score < 0.3:
+                        continue
+                    class_id = result["detection_classes"][i].decode("utf-8")
+                    label = self.labels.get(class_id, "unknown").lower()
+                    ymin, xmin, ymax, xmax = result["detection_boxes"][i]
+                    x1, y1, x2, y2 = (int(xmin * frame_w), int(ymin * frame_h), int(xmax * frame_w), int(ymax * frame_h))
+                    box_w, box_h = x2 - x1, y2 - y1
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    position, area_ratio = self.get_position(cx, cy, box_w, box_h, frame_w, frame_h)
+                    detections.append({
+                        "label": label,
+                        "pos": position,
+                        "box": (x1, y1, x2, y2),
+                        "score": score,
+                        "area_ratio": area_ratio,
+                        "center": (cx, cy)
+                    })
+            except Exception as e:
+                print("[Detector] EfficientDet detect error:", e)
+        return detections
+
+# -------------------- Onboarding --------------------
+class Onboarding:
+    def __init__(self, tts, voice):
+        self.tts = tts
+        self.voice = voice
+        self.steps = [
+            "First, make sure your device is charged and positioned comfortably. If it has a camera, keep it clear of any obstruction. Say 'Next' when you're ready.",
+            "To talk to me, just say: Hello Assistant. That is my wake word. Say 'Next' to continue.",
+            "You can change modes anytime. For example, say: Switch to Walking Mode, or Go to Navigation Mode. Say 'Next' to move on.",
+            "You can change the language anytime by saying: Change Language. I will list available languages and you can select one. Say 'Next' to continue.",
+            "Remember, I assist you, but you should always keep your cane or guide dog with you outdoors. Say 'Next' to continue.",
+            "If you ever feel unsafe, just say: Emergency. I will alert your trusted contact and share your location. Say 'Next' when ready.",
+            "If you forget what to say, ask: What can I do? and I'll remind you of available commands. That's it!"
+        ]
+
+    def _wait_for_next(self, retries=6):
+        """
+        Wait until user says 'next' or 'repeat'. If microphone is not responsive,
+        fallback to typed input after retries.
+        """
+        attempts = 0
+        while attempts < retries:
+            attempts += 1
+            cmd = self.voice.listen(timeout=8, phrase_time_limit=4, prompt="Say 'Next' or 'Repeat'.")
+            if not cmd:
+                # try again
+                continue
+            if "repeat" in cmd:
+                return "repeat"
+            if "next" in cmd:
+                return "next"
+            # accept simple 'n'/'r'
+            if cmd.strip() == "n":
+                return "next"
+            if cmd.strip() == "r":
+                return "repeat"
+        # fallback: ask typed input explicitly
+        fallback = input("No response detected. Type 'next' to proceed, 'repeat' to hear again:\n> ").strip().lower()
+        if fallback == "repeat":
+            return "repeat"
+        return "next"
+
+    def run(self):
+        self.tts.speak_blocking(
+            "Hello, welcome! I'm your voice assistant, here to help you navigate, walk safely, and manage daily tasks. "
+            "I'll give you a short introduction. After each step, say 'Next' to continue, or 'Repeat' to hear it again."
+        )
+
+        for i, step in enumerate(self.steps, 1):
+            while True:
+                self.tts.speak_blocking(f"Step {i}. {step}")
+                action = self._wait_for_next()
+                if action == "next":
+                    break
+                # 'repeat' will cause the loop to speak step again
+
+        # Final closure
+        self.tts.speak_blocking(
+            "You are now ready to start. These are the modes you can choose: Walking Mode detects obstacles around you. "
+            "Navigation Mode guides you to your destination. Reading Mode reads text, labels, and money. "
+            "Object Mode tells you what's around you. Assistant Mode gives time, weather, and reminders. "
+            "Which mode would you like to try first?"
+        )
+
+        # Wait until the user speaks a valid mode (or types it)
+        mode_choice = None
+        attempts = 0
+        while not mode_choice and attempts < 6:
+            attempts += 1
+            cmd = self.voice.listen(timeout=10, phrase_time_limit=6, prompt="Which mode would you like?")
+            if not cmd:
+                continue
+            if "walk" in cmd or "walking" in cmd:
+                mode_choice = "walking"
+            elif "navigation" in cmd or "navigate" in cmd:
+                mode_choice = "navigation"
+            elif "read" in cmd or "ocr" in cmd:
+                mode_choice = "reading"
+            elif "object" in cmd or "scene" in cmd:
+                mode_choice = "object_scene"
+            elif "assistant" in cmd or "utility" in cmd:
+                mode_choice = "assistant"
+
+        if not mode_choice:
+            # default fallback
+            mode_choice = "walking"
+            self.tts.speak_blocking("No selection detected. Defaulting to walking mode.")
+        else:
+            self.tts.speak_blocking(f"{mode_choice} mode selected. Let's begin.")
+        return mode_choice
+
+# -------------------- Core Navigator --------------------
+from translations import get_message
+
+class PersonalNavigator:
+    def _load_config(self):
+        """Load configuration from JSON file, creating default if not exists."""
+        default_config = {
+            "language": "en",
+            "voice_rate": 175,
+            "voice_volume": 0.9,
+            "alert_cooldown": 5,
+            "obstacle_cooldown": 2,
+            "camera_index": 0,
+            "camera_url": "http://192.168.1.10:8080/video",
+            "silent_startup": False,  # Enable audio during startup for language selection
+            "startup_sound_volume": 0.3,  # Moderate startup sounds
+        }
+        
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    loaded_config = json.load(f)
+                # Merge with defaults to ensure all keys exist
+                config = default_config.copy()
+                config.update(loaded_config)
+                return config
+            else:
+                # Create default config file
+                os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+                with open(self.config_file, 'w') as f:
+                    json.dump(default_config, f, indent=4, sort_keys=True)
+                return default_config
+        except Exception as e:
+            print(f"[Config] Error loading config: {e}")
+            return default_config
+
+    def _save_config(self, updates):
+        """Update configuration with new values and save to file."""
+        try:
+            # Load current config
+            current_config = self._load_config()
+            # Update with new values
+            current_config.update(updates)
+            
+            # Save back to file
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+            with open(self.config_file, 'w') as f:
+                json.dump(current_config, f, indent=4, sort_keys=True)
+            
+            self.config = current_config
+        except Exception as e:
+            print(f"[Config] Error saving config: {e}")
+
+    def __init__(self, detector_type="yolo", model_path="yolov8n.pt"):
+        try:
+            # Initialize core components with proper sequencing
+            
+            # 1. Load configuration first
+            self.config_file = os.path.join(os.path.dirname(DATA_DIR), "config.json")
+            self.config = self._load_config()
+            
+            # 2. Initialize audio system with delay for proper setup
+            self.audio_manager = AudioManager(DATA_DIR)
+            time.sleep(0.5)  # Allow audio system to initialize properly
+            
+            # 3. Initialize TTS with proper error handling
+            try:
+                self.tts = MultilingualTTS(lang="en")  # Force English for startup
+                # Wait for TTS engine to be ready
+                time.sleep(0.5)
+                
+                # Configure TTS settings
+                self.speaking_rate = self.config.get("voice_rate", 175)
+                self.tts_volume = self.config.get("voice_volume", 0.9)
+                self.tts.set_rate(self.speaking_rate)
+                self.tts.set_volume(self.tts_volume)
+            except Exception as e:
+                print(f"[TTS] Error initializing TTS: {e}")
+                self.tts = None
+            
+            # 4. Initialize enhanced core components
+            self.state_manager = SystemState()  # Track system state and conversation
+            self.task_manager = TaskManager()   # Handle concurrent tasks
+            
+            # 5. Initialize detector with error handling
+            try:
+                self.detector = Detector(detector_type, model_path)
+            except Exception as e:
+                print(f"[Detector] Error initializing detector: {e}")
+                self.detector = None
+            
+            # 6. Initialize voice I/O last (force English for startup)
+            try:
+                self.voice = EnhancedVoiceIO(
+                    lang="en",  # Force English for startup, user will select language later
+                    audio_manager=self.audio_manager,
+                    tts=self.tts
+                )
+                print("[Voice] Voice I/O initialized successfully")
+            except Exception as e:
+                print(f"[Voice] Error initializing voice I/O: {e}")
+                # Create a fallback voice I/O that uses basic speech recognition
+                try:
+                    from utils.voice_io import BasicVoiceIO
+                    self.voice = BasicVoiceIO(lang="en")  # Force English for startup
+                    print("[Voice] Using fallback voice I/O")
+                except Exception as e2:
+                    print(f"[Voice] Fallback voice I/O also failed: {e2}")
+                self.voice = None
+            
+            # Use enhanced IntentRouter
+            self.router = IntentRouter()
+            
+            # Initialize tutorial system
+            self.tutorial = TutorialManager(self.tts, self.audio_manager)
+            
+            # Initialize modes
+            self.walking_manager = None  # Will be initialized on demand
+            self.current_mode = None
+            
+            # Play startup sound quietly if not in silent mode
+            startup_volume = self.config.get("startup_sound_volume", 0.2)
+            if not self.config.get("silent_startup", True):
+                self.audio_manager.play('startup', channel_name='effect', volume=startup_volume)
+            
+            # State variables
+            self.lang = self.config.get("language", "en")
+            self.transport_mode = None
+            self.destination = None
+            
+            # Alert thresholds
+            self.urgent_proximity_threshold = 0.4  # 40% of frame area
+            self.normal_proximity_threshold = 0.2  # 20% of frame area
+
+            # Initialize empty voice commands dictionary
+            self.voice_commands = {}
+            
+            # Voice control settings from config
+            self.speaking_rate = self.config.get("voice_rate", 175)  # words per minute
+            self.tts_volume = self.config.get("voice_volume", 0.9)   # 0.0 to 1.0
+            
+            # Apply loaded settings
+            self.tts.set_rate(self.speaking_rate)
+            self.tts.set_volume(self.tts_volume)
+
+            # Alert settings from config
+            self.alert_cooldown = self.config.get("alert_cooldown", 5)
+            self.obstacle_cooldown = self.config.get("obstacle_cooldown", 2)
+            
+            # Initialize remaining attributes
+            self.detected_objects = []
+            self.lock = threading.Lock()
+            self.last_alert_time = 0
+            self.last_obstacle_time = 0
+            self.sound_events = deque(maxlen=20)
+            self._cap = None
+            self._stop_event = threading.Event()
+            self.llm = Phi3Assistant()
+            
+            # Register core tasks
+            self._register_core_tasks()
+            
+        except Exception as e:
+            print(f"[Navigator] Error during initialization: {e}")
+            raise
+
+
+    def _open_camera(self, camera_index=0):
+        cap = cv2.VideoCapture(camera_index)  # Use local camera
+        if not cap.isOpened():
+            raise RuntimeError(get_message("errors", "camera_error", self.lang))
+        # Optimize camera settings for better performance
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer size for lower latency
+        self._cap = cap
+
+    def _close_camera(self):
+        if self._cap:
+            self._cap.release()
+            self._cap = None
+
+    def speak(self, text, blocking=False, message_type="info", urgent=False):
+        if blocking:
+            self.tts.speak_blocking(text, message_type=message_type, urgent=urgent)
+        else:
+            self.tts.speak(text, message_type=message_type)
+
+    def listen(self, timeout=7, phrase_time_limit=None, prompt=None):
+        return self.voice.listen(timeout=timeout, phrase_time_limit=phrase_time_limit, prompt=prompt)
+
+    def set_language(self, lang_name_or_code):
+        """Change the system language and persist the setting."""
+        code = lang_name_or_code
+        if lang_name_or_code in LANGUAGES:
+            code = LANGUAGES[lang_name_or_code]
+        if code not in LANGUAGES.values():
+            code = "en"
+        
+        self.lang = code
+        self.tts.set_lang(code)
+        self.voice.set_lang(code)
+        
+        # Save language preference
+        self._save_config({"language": code})
+        
+        # Announce language change
+        language_names = {
+            "en": "English",
+            "hi": "Hindi", 
+            "kn": "Kannada"
+        }
+        lang_name = language_names.get(code, "English")
+        self.speak(f"Language changed to {lang_name}", blocking=True)
+    
+    def change_language_interactive(self):
+        """Interactive language change feature."""
+        # For now, assume all languages are available
+        # In the future, this can check for actual model availability
+        available_models = {"en", "hi", "kn"}
+        
+        # Define available languages
+        languages_info = {
+            "en": {
+                "name": "English", 
+                "keywords": ['english', 'inglish', 'ing', 'en', 'one', 'first', 'english language', 'english mode']
+            },
+            "hi": {
+                "name": "Hindi", 
+                "keywords": ['hindi', 'हिंदी', 'हिन्दी', 'hi', 'two', 'second', 'hindi language', 'hindi mode', 'hindee', 'hinde']
+            },
+            "kn": {
+                "name": "Kannada", 
+                "keywords": ['kannada', 'ಕನ್ನಡ', 'kannad', 'kn', 'three', 'third', 'kannada language', 'kannada mode', 'kannad', 'kannad language']
+            }
+        }
+        
+        # List available languages
+        available_languages = []
+        for code, info in languages_info.items():
+            if code in available_models:
+                available_languages.append((code, info))
+        
+        if not available_languages:
+            self.speak("No language models available for switching.", blocking=True)
+            return
+        
+        # Announce available languages
+        self.speak("Available languages for switching are:", blocking=True)
+        for i, (code, info) in enumerate(available_languages, 1):
+            self.speak(f"{i}. {info['name']}", blocking=True)
+            time.sleep(0.3)
+        
+        self.speak("Please say the name of the language you want to switch to, or say the number.", blocking=True)
+        time.sleep(0.5)
+        
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            # Try to listen for voice input
+            response = self.voice.listen(timeout=10)
+            if response:
+                response = response.lower().strip()
+                
+                # Check for number selection
+                if response in ['1', 'one', 'first']:
+                    self.set_language(available_languages[0][0])
+                    return
+                elif response in ['2', 'two', 'second'] and len(available_languages) > 1:
+                    self.set_language(available_languages[1][0])
+                    return
+                elif response in ['3', 'three', 'third'] and len(available_languages) > 2:
+                    self.set_language(available_languages[2][0])
+                    return
+                
+                # Check for language name selection
+                for code, info in available_languages:
+                    if any(word in response for word in info["keywords"]):
+                        self.set_language(code)
+                        return
+                
+                # If no valid language detected
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't understand your selection. Please say the language name or number.", blocking=True)
+                    time.sleep(0.5)
+            else:
+                # No response
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't hear anything. Please try again.", blocking=True)
+                    time.sleep(0.5)
+        
+        self.speak("Language change cancelled.", blocking=True)
+    
+    def _voice_driven_startup(self):
+        """Complete voice-driven startup workflow."""
+        try:
+            # Check if voice is available
+            if not self.voice:
+                self.speak("Voice recognition not available. Using default settings.", blocking=True)
+                self.speak("Please restart the system to enable voice features.", blocking=True)
+                return
+            
+            # Step 1: Welcome greeting
+            self._welcome_greeting()
+            
+            # Step 2: Language selection
+            chosen_lang = self._voice_language_selection()
+            self.set_language(chosen_lang)
+            
+            # Step 3: User guidelines in selected language
+            self._voice_user_guidelines()
+            
+            # Step 4: Mode selection
+            selected_mode = self._voice_mode_selection()
+            self.change_mode(selected_mode)
+            
+            # Step 5: Mode-specific setup
+            self._voice_mode_setup(selected_mode)
+            
+        except Exception as e:
+            self.speak("An error occurred during startup. Using default settings.", blocking=True)
+            self.speak("Please restart the system if problems persist.", blocking=True)
+    
+    def _welcome_greeting(self):
+        """Step 1: Welcome greeting."""
+        # Speak welcome immediately after background music ends using direct blocking to avoid queue deadlock
+        self.tts.speak_direct_blocking("Welcome to your personal navigator!")
+        time.sleep(0.5)
+        self.tts.speak_direct_blocking("I am your voice assistant, here to help you navigate safely and manage daily tasks.")
+        time.sleep(0.5)
+        self.tts.speak_direct_blocking("Let's get started by setting up your preferences.")
+        time.sleep(1)
+    
+    def _voice_language_selection(self):
+        """Step 2: Voice-based language selection."""
+        self.speak("First, let's select your preferred language.", blocking=True)
+        time.sleep(0.5)
+        
+        # Define available languages
+        languages_info = {
+            "en": {
+                "name": "English", 
+                "keywords": ['english', 'inglish', 'ing', 'en', 'one', 'first', 'english language', 'english mode']
+            },
+            "hi": {
+                "name": "Hindi", 
+                "keywords": ['hindi', 'हिंदी', 'हिन्दी', 'hi', 'two', 'second', 'hindi language', 'hindi mode', 'hindee', 'hinde']
+            },
+            "kn": {
+                "name": "Kannada", 
+                "keywords": ['kannada', 'ಕನ್ನಡ', 'kannad', 'kn', 'three', 'third', 'kannada language', 'kannada mode', 'kannad', 'kannad language']
+            }
+        }
+        
+        # Use all languages for voice-driven startup (no model checking)
+        available_languages = list(languages_info.items())
+        
+        # List available languages
+        self.speak("Available languages are:", blocking=True)
+        for i, (code, info) in enumerate(available_languages, 1):
+            self.speak(f"{i}. {info['name']}", blocking=True)
+            time.sleep(0.3)
+        
+        self.speak("Please say the name of your preferred language, or say the number.", blocking=True)
+        time.sleep(0.5)
+        
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            # Activate microphone with clear audio cues
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            # Clear microphone activation signal
+            self.speak("Listening...", blocking=True)
+            time.sleep(0.3)
+            
+            # Activate microphone and listen (use standard speech recognition)
+            if self.voice:
+                response = self.voice.listen(timeout=10)
+            else:
+                self.speak("Voice recognition not available. Using English as default.", blocking=True)
+                return "en"
+            
+            if response:
+                response = response.lower().strip()
+                # User response logged for debugging (voice-only interface)
+                
+                # Check for number selection
+                if response in ['1', 'one', 'first']:
+                    self.speak("English language selected.", blocking=True)
+                    return available_languages[0][0]
+                elif response in ['2', 'two', 'second'] and len(available_languages) > 1:
+                    self.speak("Hindi language selected.", blocking=True)
+                    return available_languages[1][0]
+                elif response in ['3', 'three', 'third'] and len(available_languages) > 2:
+                    self.speak("Kannada language selected.", blocking=True)
+                    return available_languages[2][0]
+                
+                # Check for language name selection
+                for code, info in available_languages:
+                    if any(word in response for word in info["keywords"]):
+                        self.speak(f"{info['name']} language selected.", blocking=True)
+                        return code
+                
+                # If no valid language detected
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't understand your selection. Please say the language name or number clearly.", blocking=True)
+                    time.sleep(0.5)
+            else:
+                # No response
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't hear anything. Please speak clearly into the microphone.", blocking=True)
+                    time.sleep(0.5)
+        
+        # Default to first available language
+        self.speak("No valid selection detected. Using English as default.", blocking=True)
+        return available_languages[0][0]
+    
+    def _voice_user_guidelines(self):
+        """Step 3: User guidelines in selected language."""
+        # Guidelines in different languages
+        guidelines = {
+            "en": [
+                "Here are some important guidelines for using your personal navigator:",
+                "First, make sure your device is charged and positioned comfortably.",
+                "If it has a camera, keep it clear of any obstruction.",
+                "To talk to me, just say: Hello Assistant. That is my wake word.",
+                "You can change modes anytime. For example, say: Switch to Walking Mode, or Go to Navigation Mode.",
+                "You can change the language anytime by saying: Change Language.",
+                "Remember, I assist you, but you should always keep your cane or guide dog with you outdoors.",
+                "If you ever feel unsafe, just say: Emergency. I will alert your trusted contact and share your location.",
+                "If you forget what to say, ask: What can I do? and I'll remind you of available commands."
+            ],
+            "hi": [
+                "यहाँ आपके व्यक्तिगत नेविगेटर का उपयोग करने के लिए कुछ महत्वपूर्ण दिशानिर्देश हैं:",
+                "सबसे पहले, सुनिश्चित करें कि आपका डिवाइस चार्ज है और आराम से रखा गया है।",
+                "यदि इसमें कैमरा है, तो इसे किसी भी बाधा से मुक्त रखें।",
+                "मुझसे बात करने के लिए, बस कहें: हैलो असिस्टेंट। यह मेरा वेक वर्ड है।",
+                "आप कभी भी मोड बदल सकते हैं। उदाहरण के लिए, कहें: वॉकिंग मोड पर स्विच करें, या नेविगेशन मोड पर जाएं।",
+                "आप कभी भी भाषा बदल सकते हैं। बस कहें: भाषा बदलें।",
+                "याद रखें, मैं आपकी सहायता करता हूं, लेकिन आपको हमेशा अपनी छड़ी या गाइड डॉग को बाहर रखना चाहिए।",
+                "यदि आप कभी असुरक्षित महसूस करते हैं, तो बस कहें: इमरजेंसी। मैं आपके विश्वसनीय संपर्क को सतर्क करूंगा।",
+                "यदि आप भूल जाते हैं कि क्या कहना है, तो पूछें: मैं क्या कर सकता हूं? और मैं आपको उपलब्ध कमांड याद दिलाऊंगा।"
+            ],
+            "kn": [
+                "ನಿಮ್ಮ ವೈಯಕ್ತಿಕ ನ್ಯಾವಿಗೇಟರ್ ಅನ್ನು ಬಳಸಲು ಕೆಲವು ಪ್ರಮುಖ ಮಾರ್ಗದರ್ಶಿಗಳು ಇಲ್ಲಿವೆ:",
+                "ಮೊದಲು, ನಿಮ್ಮ ಸಾಧನವು ಚಾರ್ಜ್ ಆಗಿದೆ ಮತ್ತು ಆರಾಮದಾಯಕವಾಗಿ ಇರಿಸಲಾಗಿದೆ ಎಂದು ಖಚಿತಪಡಿಸಿಕೊಳ್ಳಿ.",
+                "ಇದು ಕ್ಯಾಮೆರಾವನ್ನು ಹೊಂದಿದ್ದರೆ, ಅದನ್ನು ಯಾವುದೇ ಅಡಚಣೆಯಿಂದ ಮುಕ್ತವಾಗಿ ಇರಿಸಿ.",
+                "ನನ್ನೊಂದಿಗೆ ಮಾತನಾಡಲು, ಕೇವಲ ಹೇಳಿ: ಹಲೋ ಅಸಿಸ್ಟೆಂಟ್. ಅದು ನನ್ನ ವೇಕ್ ವರ್ಡ್.",
+                "ನೀವು ಯಾವುದೇ ಸಮಯದಲ್ಲಿ ಮೋಡ್ ಬದಲಾಯಿಸಬಹುದು. ಉದಾಹರಣೆಗೆ, ಹೇಳಿ: ವಾಕಿಂಗ್ ಮೋಡ್‌ಗೆ ಬದಲಾಯಿಸಿ, ಅಥವಾ ನ್ಯಾವಿಗೇಶನ್ ಮೋಡ್‌ಗೆ ಹೋಗಿ.",
+                "ನೀವು ಯಾವುದೇ ಸಮಯದಲ್ಲಿ ಭಾಷೆಯನ್ನು ಬದಲಾಯಿಸಬಹುದು. ಕೇವಲ ಹೇಳಿ: ಭಾಷೆ ಬದಲಾಯಿಸಿ.",
+                "ನೆನಪಿಡಿ, ನಾನು ನಿಮಗೆ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ, ಆದರೆ ನೀವು ಯಾವಾಗಲೂ ನಿಮ್ಮ ಕೋಲು ಅಥವಾ ಗೈಡ್ ನಾಯಿಯನ್ನು ಹೊರಗೆ ಇರಿಸಬೇಕು.",
+                "ನೀವು ಯಾವುದೇ ಸಮಯದಲ್ಲಿ ಅಸುರಕ್ಷಿತವಾಗಿ ಭಾವಿಸಿದರೆ, ಕೇವಲ ಹೇಳಿ: ತುರ್ತು. ನಾನು ನಿಮ್ಮ ನಂಬಲರ್ಹ ಸಂಪರ್ಕವನ್ನು ಎಚ್ಚರಿಸುತ್ತೇನೆ.",
+                "ನೀವು ಏನು ಹೇಳಬೇಕೆಂದು ಮರೆತರೆ, ಕೇಳಿ: ನಾನು ಏನು ಮಾಡಬಹುದು? ಮತ್ತು ನಾನು ನಿಮಗೆ ಲಭ್ಯವಿರುವ ಆಜ್ಞೆಗಳನ್ನು ನೆನಪಿಸುತ್ತೇನೆ."
+            ]
+        }
+        
+        current_guidelines = guidelines.get(self.lang, guidelines["en"])
+        
+        for guideline in current_guidelines:
+            self.speak(guideline, blocking=True)
+            time.sleep(0.5)
+        
+        self.speak("Now let's select your preferred mode.", blocking=True)
+        time.sleep(0.5)
+    
+    def _voice_mode_selection(self):
+        """Step 4: Voice-based mode selection."""
+        # Mode information in different languages
+        mode_info = {
+            "en": {
+                "walking": {"name": "Walking Mode", "desc": "I will detect obstacles around you and guide your path safely."},
+                "navigation": {"name": "Navigation Mode", "desc": "I will help you reach your destination with turn-by-turn directions."},
+                "reading": {"name": "Reading Mode", "desc": "I will read text from your surroundings, including signs and documents."},
+                "object_scene": {"name": "Object and Scene Mode", "desc": "I will describe objects and surroundings around you."},
+                "assistant": {"name": "Assistant Mode", "desc": "I will help with information, reminders, and daily tasks."}
+            },
+            "hi": {
+                "walking": {"name": "वॉकिंग मोड", "desc": "मैं आपके आसपास की बाधाओं का पता लगाऊंगा और आपके रास्ते को सुरक्षित रूप से निर्देशित करूंगा।"},
+                "navigation": {"name": "नेविगेशन मोड", "desc": "मैं आपको अपने गंतव्य तक पहुंचने में मदद करूंगा।"},
+                "reading": {"name": "रीडिंग मोड", "desc": "मैं आपके आसपास के टेक्स्ट को पढ़ूंगा, जिसमें साइन और दस्तावेज शामिल हैं।"},
+                "object_scene": {"name": "ऑब्जेक्ट और सीन मोड", "desc": "मैं आपके आसपास की वस्तुओं और दृश्यों का वर्णन करूंगा।"},
+                "assistant": {"name": "असिस्टेंट मोड", "desc": "मैं जानकारी, अनुस्मारक और दैनिक कार्यों में मदद करूंगा।"}
+            },
+            "kn": {
+                "walking": {"name": "ವಾಕಿಂಗ್ ಮೋಡ್", "desc": "ನಾನು ನಿಮ್ಮ ಸುತ್ತಲಿನ ಅಡಚಣೆಗಳನ್ನು ಪತ್ತೆ ಮಾಡುತ್ತೇನೆ ಮತ್ತು ನಿಮ್ಮ ಮಾರ್ಗವನ್ನು ಸುರಕ್ಷಿತವಾಗಿ ಮಾರ್ಗದರ್ಶನ ನೀಡುತ್ತೇನೆ."},
+                "navigation": {"name": "ನ್ಯಾವಿಗೇಶನ್ ಮೋಡ್", "desc": "ನಾನು ನಿಮ್ಮ ಗಮ್ಯಸ್ಥಾನವನ್ನು ತಲುಪಲು ಸಹಾಯ ಮಾಡುತ್ತೇನೆ."},
+                "reading": {"name": "ರೀಡಿಂಗ್ ಮೋಡ್", "desc": "ನಾನು ನಿಮ್ಮ ಸುತ್ತಲಿನ ಪಠ್ಯವನ್ನು ಓದುತ್ತೇನೆ, ಚಿಹ್ನೆಗಳು ಮತ್ತು ದಾಖಲೆಗಳು ಸೇರಿದಂತೆ."},
+                "object_scene": {"name": "ಆಬ್ಜೆಕ್ಟ್ ಮತ್ತು ಸೀನ್ ಮೋಡ್", "desc": "ನಾನು ನಿಮ್ಮ ಸುತ್ತಲಿನ ವಸ್ತುಗಳು ಮತ್ತು ದೃಶ್ಯಗಳನ್ನು ವಿವರಿಸುತ್ತೇನೆ."},
+                "assistant": {"name": "ಅಸಿಸ್ಟೆಂಟ್ ಮೋಡ್", "desc": "ನಾನು ಮಾಹಿತಿ, ನೆನಪುಗಳು ಮತ್ತು ದೈನಂದಿನ ಕಾರ್ಯಗಳಲ್ಲಿ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ."}
+            }
+        }
+        
+        current_mode_info = mode_info.get(self.lang, mode_info["en"])
+        
+        self.speak("Available modes are:", blocking=True)
+        time.sleep(0.5)
+        
+        mode_list = list(current_mode_info.items())
+        for i, (mode_key, info) in enumerate(mode_list, 1):
+            self.speak(f"{i}. {info['name']}", blocking=True)
+            time.sleep(0.3)
+            self.speak(f"   {info['desc']}", blocking=True)
+            time.sleep(0.5)
+        
+        self.speak("Please say the name of your preferred mode, or say the number.", blocking=True)
+        time.sleep(0.5)
+        
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            # Activate microphone with clear audio cues
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            # Clear microphone activation signal
+            self.speak("Listening...", blocking=True)
+            time.sleep(0.3)
+            
+            # Activate microphone and listen
+            if self.voice:
+                response = self.voice.listen(timeout=10)
+            else:
+                self.speak("Voice recognition not available. Using walking mode as default.", blocking=True)
+                return "walking"
+            
+            if response:
+                response = response.lower().strip()
+                # User response logged for debugging (voice-only interface)
+                
+                # Check for number selection
+                if response in ['1', 'one', 'first']:
+                    mode_name = mode_list[0][1]['name']
+                    self.speak(f"{mode_name} mode selected.", blocking=True)
+                    return mode_list[0][0]
+                elif response in ['2', 'two', 'second']:
+                    mode_name = mode_list[1][1]['name']
+                    self.speak(f"{mode_name} mode selected.", blocking=True)
+                    return mode_list[1][0]
+                elif response in ['3', 'three', 'third']:
+                    mode_name = mode_list[2][1]['name']
+                    self.speak(f"{mode_name} mode selected.", blocking=True)
+                    return mode_list[2][0]
+                elif response in ['4', 'four', 'fourth']:
+                    mode_name = mode_list[3][1]['name']
+                    self.speak(f"{mode_name} mode selected.", blocking=True)
+                    return mode_list[3][0]
+                elif response in ['5', 'five', 'fifth']:
+                    mode_name = mode_list[4][1]['name']
+                    self.speak(f"{mode_name} mode selected.", blocking=True)
+                    return mode_list[4][0]
+                
+                # Check for mode name selection
+                for mode_key, info in mode_list:
+                    if any(word in response for word in [mode_key, info['name'].lower()]):
+                        self.speak(f"{info['name']} mode selected.", blocking=True)
+                        return mode_key
+                
+                # If no valid mode detected
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't understand your selection. Please say the mode name or number clearly.", blocking=True)
+                    time.sleep(0.5)
+            else:
+                # No response
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't hear anything. Please speak clearly into the microphone.", blocking=True)
+                    time.sleep(0.5)
+        
+        # Default to walking mode
+        self.speak("No valid selection detected. Using walking mode as default.", blocking=True)
+        return "walking"
+    
+    def _voice_mode_setup(self, selected_mode):
+        """Step 5: Mode-specific setup."""
+        if selected_mode == "navigation":
+            self.speak("Please say your destination.", blocking=True)
+            time.sleep(0.5)
+            
+            # Activate microphone for destination
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            self.speak("Listening for destination...", blocking=True)
+            time.sleep(0.3)
+            
+            dest = self.voice.listen(timeout=12, phrase_time_limit=6, prompt="Say destination")
+            self.destination = dest if dest else "default location"
+            self.speak(f"Destination set to {self.destination}.", blocking=True)
+            
+            self.speak(f"Select transport: {', '.join(TRANSPORT_MODES)}.", blocking=True)
+            time.sleep(0.5)
+            
+            # Activate microphone for transport
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            self.speak("Listening for transport choice...", blocking=True)
+            time.sleep(0.3)
+            
+            tr = self.voice.listen(timeout=10, phrase_time_limit=5, prompt="Choose transport")
+            if tr and any(t in tr for t in TRANSPORT_MODES):
+                self.transport_mode = tr
+                self.speak(f"{tr} selected.", blocking=True)
+            else:
+                self.transport_mode = "walking"
+                self.speak("Defaulting to walking.", blocking=True)
+        
+        self.speak("Setup complete! You can now start using your personal navigator.", blocking=True)
+        time.sleep(0.5)
+        self.speak("Say 'Hello Assistant' to activate voice commands, or ask 'What can I do?' for help.", blocking=True)
+        
+    def adjust_voice_rate(self, faster=True):
+        """Adjust TTS speaking rate."""
+        step = 25  # WPM adjustment step
+        if faster:
+            self.speaking_rate = min(300, self.speaking_rate + step)
+            self.tts.set_rate(self.speaking_rate)
+            self.tts.speak(f"Speaking rate increased to {self.speaking_rate} words per minute", blocking=True)
+        else:
+            self.speaking_rate = max(100, self.speaking_rate - step)
+            self.tts.set_rate(self.speaking_rate)
+            self.tts.speak(f"Speaking rate decreased to {self.speaking_rate} words per minute", blocking=True)
+    
+    def adjust_volume(self, increase=True):
+        """Adjust TTS and sound effect volume."""
+        step = 0.1
+        if increase:
+            self.tts_volume = min(1.0, self.tts_volume + step)
+        else:
+            self.tts_volume = max(0.1, self.tts_volume - step)
+            
+        # Update both TTS and sound effect volumes
+        self.tts.set_volume(self.tts_volume)
+        self.audio_manager.set_volume(self.tts_volume)
+        
+        # Announce new volume
+        percentage = int(self.tts_volume * 100)
+        self.tts.speak(f"Volume set to {percentage} percent", blocking=True)
+
+    # Emergency hook
+    def emergency_assistance(self, reason=""):
+        self.speak("Emergency alert activated!", message_type="error", urgent=True)
+        self.speak(f"Sending emergency alert. Reason: {reason}", message_type="error", blocking=True)
+        self.speak("Attempting to contact emergency services...", message_type="info")
+        # Integrate phone/HTTP/SMS API here
+        
+    def device_status(self):
+        self.speak("Checking device status...", blocking=True)
+        # TODO: Add actual battery check
+        self.speak("Battery status not available. Please enable device APIs.", 
+                  message_type="warning", blocking=True)
+    
+    def check_ocr_status(self):
+        """Check and report OCR status."""
+        try:
+            import pytesseract
+            version = pytesseract.get_tesseract_version()
+            self.speak(f"OCR is available. Tesseract version {version}", blocking=True)
+            return True
+        except Exception as e:
+            self.speak("OCR is not available. Please install Tesseract.", 
+                      message_type="warning", blocking=True)
+            return False
+        
+    def speak_help(self):
+        """Speak available voice commands."""
+        help_text = """Available voice commands:
+        - Faster or Slower: Adjust speaking rate
+        - Louder or Quieter: Adjust volume
+        - Start Tutorial: Begin guided tutorial
+        - Exit Tutorial: Leave tutorial mode
+        - Switch Mode: Change between walking, navigation, reading, or assistant mode
+        - Change Language: Switch to a different language
+        - Language Settings: Access language options
+        - Check OCR: Check text recognition status
+        - Read Text: Read text from camera view
+        For more help, just ask me what you'd like to do."""
+        self.speak(help_text, blocking=True)
+
+    def _init_voice_commands(self):
+        """Initialize voice commands after walking manager is created."""
+        if self.walking_manager:
+            self.voice_commands = {
+                "stop walking": self.walking_manager.stop_walking,
+                "pause walking": self.walking_manager.pause_walking,
+                "resume walking": self.walking_manager.resume_walking,
+                "scan area": self.walking_manager.request_scan,
+                "start walking": self.walking_manager.start_walking_mode,
+                "rescan": self.walking_manager.request_scan,
+                "look around": self.walking_manager.request_scan
+            }
+
+    def change_mode(self, mode_key):
+        try:
+            # Initialize walking mode if needed
+            if mode_key == "walking" and self.walking_manager is None:
+                from modes.walking.walking_mode import WalkingModeManager
+                self.walking_manager = WalkingModeManager(self)
+                self._init_voice_commands()  # Initialize commands after manager is created
+
+            mode_info = {
+                "walking": {
+                    "name": "Walking mode",
+                    "desc": "I will alert you about obstacles and guide your path."
+                },
+                "navigation": {
+                    "name": "Navigation mode",
+                    "desc": "I will help you reach your destination safely."
+                },
+                "reading": {
+                    "name": "Reading mode",
+                    "desc": "I will read text from your surroundings."
+                },
+                "object_scene": {
+                    "name": "Object and Scene mode",
+                    "desc": "I will describe objects and surroundings."
+                },
+                "assistant": {
+                    "name": "Assistant mode",
+                    "desc": "I will help with information and tasks."
+                }
+            }
+            
+            mode_data = mode_info.get(mode_key, {"name": mode_key, "desc": ""})
+            
+            # First play processing sound
+            self.audio_manager.play_processing()
+            
+            # Update mode
+            self.current_mode = mode_key
+            
+            # Stop processing sound and play mode change sound
+            self.audio_manager.stop_channel('effect')
+            self.audio_manager.play('mode_change')
+            
+            # Announce mode change
+            self.speak(f"Switching to {mode_data['name']}", message_type="success", blocking=True)
+            if mode_data["desc"]:
+                self.speak(mode_data["desc"], blocking=True)
+            
+            # Initialize walking mode if selected
+            if mode_key == "walking":
+                self.walking_manager.start_walking_mode()
+                
+            # Play ready sound to indicate mode is fully initialized
+            self.audio_manager.play_ready()
+            
+        except Exception as e:
+            print(f"[Mode Change] Error changing to {mode_key} mode: {e}")
+            self.speak("Sorry, there was an error changing modes. Please try again.", 
+                      message_type="error", blocking=True)
+
+    def guide_obstacles(self):
+        now = time.time()
+        with self.lock:
+            urgent_obstacles = []
+            normal_obstacles = []
+            
+            for obj in self.detected_objects:
+                if obj["label"] in OBSTACLES or obj["label"] == "person":
+                    # Check if obstacle is too close (based on box size)
+                    x1, y1, x2, y2 = obj["box"]
+                    box_area = (x2 - x1) * (y2 - y1)
+                    frame_area = 640 * 480  # Assumed frame size
+                    proximity = box_area / frame_area
+                    
+                    if proximity > self.urgent_proximity_threshold:
+                        urgent_obstacles.append(obj)
+                    elif proximity > self.normal_proximity_threshold:
+                        normal_obstacles.append(obj)
+            
+            # Announce obstacles if enough time has passed
+            if (now - self.last_obstacle_time) > self.obstacle_cooldown:
+                # Urgent obstacles first
+                for obj in urgent_obstacles:
+                    # Play urgent obstacle sound
+                    self.audio_manager.play_obstacle(very_near=True)
+                    self.speak(
+                        f"Caution! {obj['label']} very close on your {obj['pos']}",
+                        message_type="warning",
+                        urgent=True,
+                        blocking=True
+                    )
+                
+                # Then normal obstacles
+                if normal_obstacles:
+                    # Play normal obstacle sound once
+                    if not urgent_obstacles:  # Only if no urgent sounds played
+                        self.audio_manager.play_obstacle(very_near=False)
+                    
+                    descriptions = []
+                    for obj in normal_obstacles[:3]:  # Limit to 3 obstacles
+                        descriptions.append(f"{obj['label']} on the {obj['pos']}")
+                    
+                    if descriptions:
+                        self.speak(
+                            "Notice: " + ". ".join(descriptions),
+                            message_type="info",
+                            blocking=False
+                        )
+                
+                self.last_obstacle_time = now
+
+
+    def check_emergency(self):
+        now = time.time()
+        with self.lock:
+            for obj in self.detected_objects:
+                if obj["label"] in EMERGENCIES and (now - self.last_alert_time) > self.alert_cooldown:
+                    # Play urgent alert sound
+                    self.audio_manager.play_alert(urgent=True)
+                    self.speak(f"Emergency detected: {obj['label']} at {obj['pos']}", blocking=True)
+                    self.last_alert_time = now
+                    self.emergency_assistance(reason=f"Detected {obj['label']}")
+
+    # Mode ticks
+    def walking_tick(self):
+        # Use the advanced walking mode manager for comprehensive guidance
+        self.walking_manager.process_walking_tick()
+
+    def navigation_tick(self):
+        # Placeholder for GPS turn-by-turn
+        pass
+
+    def reading_tick(self, frame):
+        # Check OCR availability
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            ocr_available = True
+        except:
+            ocr_available = False
+            
+        if not ocr_available:
+            if not hasattr(self, '_ocr_warned'):
+                self._ocr_warned = True
+                print("[Reading Mode] OCR (text recognition) is not available.")
+                self.speak("Text recognition is not available. Please install Tesseract to enable this feature.", 
+                          message_type="warning", blocking=True)
+            return
+
+        # Initialize reading manager if needed
+        if not hasattr(self, 'reading_manager'):
+            from modes.reading.reading_mode import ReadingModeManager
+            self.reading_manager = ReadingModeManager(self)
+            self.reading_manager.start_reading_mode()
+            
+        # Process frame for OCR
+        if self.router.is_read_command(self.last_command):
+            if self.reading_manager.process_frame(frame):
+                self.reading_manager.start_reading()
+            self.last_command = None  # Reset command after processing
+
+    def object_scene_tick(self):
+        with self.lock:
+            if not self.detected_objects:
+                return
+            top = sorted(self.detected_objects, key=lambda d: d.get("score", 0), reverse=True)[:3]
+            parts = [f"{d['label']} at {d['pos']}" for d in top]
+            self.speak(". ".join(parts), blocking=False)
+
+    def assistant_tick(self, last_command=None):
+        if not last_command:
+            return
+
+        # Collect some context from objects detected
+        with self.lock:
+            top = sorted(self.detected_objects, key=lambda d: d.get("score", 0), reverse=True)[:4]
+        detections_text = "; ".join([f"{d['label']} at {d['pos']}" for d in top]) or "no objects detected"
+
+        # Build prompt with appropriate language instruction
+        prompt = (f"Context: {detections_text}. User said: {last_command}. "
+                f"Respond briefly, max 20 words.")
+
+        try:
+            # Pass current language to the LLM
+            reply = self.llm.chat(prompt, lang=self.lang)
+            self.speak(reply)
+        except Exception as e:
+            print("LLM error:", e)
+            error_msgs = {
+                "en": "Sorry, assistant not available.",
+                "hi": "क्षमा करें, सहायक उपलब्ध नहीं है।",
+                "kn": "ಕ್ಷಮಿಸಿ, ಸಹಾಯಕ ಲಭ್ಯವಿಲ್ಲ."
+            }
+            self.speak(error_msgs.get(self.lang, error_msgs["en"]))
+
+    # Detection loop
+    def detection_loop(self):
+        """
+        Optimized detection loop with better error handling and performance
+        """
+        if not self._cap:
+            print("[Camera] No camera initialized")
+            return
+            
+        try:
+            frame_skip = 3  # Process every nth frame for better performance
+            frame_count = 0
+            last_process_time = time.time()
+            fps_target = 30
+            frame_time = 1.0 / fps_target
+            
+            while not self._stop_event.is_set():
+                # Frame capture with timeout
+                try:
+                    ret, frame = self._cap.read()
+                    if not ret:
+                        time.sleep(0.05)
+                        continue
+                except Exception as e:
+                    print(f"Camera error: {e}")
+                    time.sleep(0.1)
+                    continue
+
+                frame_count += 1
+                current_time = time.time()
+                
+                # Skip frames for performance
+                if frame_count % frame_skip != 0:
+                    # Still show camera feed for developer
+                    cv2.imshow("Developer Camera View", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        self._stop_event.set()
+                        break
+                    continue
+
+                # Only run detection if we have a detector
+                filtered = []
+                if self.detector and self.detector.model:
+                    try:
+                        detections = self.detector.detect(frame)
+                        for d in detections:
+                            lbl = d["label"]
+                            if (lbl in STREET_CLASSES) or (lbl in OBSTACLES) or (lbl in EMERGENCIES):
+                                filtered.append(d)
+
+                                # draw boxes for developer
+                                x1, y1, x2, y2 = d["box"]
+                                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                                cv2.putText(frame, f"{lbl} {d['score']:.2f}",
+                                          (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                          0.6, (0, 255, 0), 2)
+                    except Exception as e:
+                        print(f"Detection error: {e}")
+
+                # Update detected objects thread-safely
+                with self.lock:
+                    self.detected_objects = filtered
+
+                # Run mode-specific logic based on current mode
+                try:
+                    self.check_emergency()
+                    if self.current_mode == "walking":
+                        self.walking_tick()
+                    elif self.current_mode == "navigation":
+                        self.navigation_tick()
+                    elif self.current_mode == "reading":
+                        self.reading_tick(frame)
+                    elif self.current_mode == "object_scene":
+                        self.object_scene_tick()
+                except Exception as e:
+                    print(f"Mode processing error: {e}")
+
+                # Show developer camera window
+                cv2.imshow("Developer Camera View", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self._stop_event.set()
+                    break
+
+                # Maintain consistent frame rate
+                elapsed = time.time() - current_time
+                if elapsed < frame_time:
+                    time.sleep(frame_time - elapsed)
+        finally:
+            self._close_camera()
+            cv2.destroyAllWindows()
+
+
+    # Command loop (always listening)
+    def _register_core_tasks(self):
+        """Register core system tasks with the task manager."""
+        self.task_manager.add_task(
+            "object_detection",
+            self.detection_loop,
+            TaskPriority.HIGH
+        )
+        
+        self.task_manager.add_task(
+            "command_processing",
+            self.command_loop,
+            TaskPriority.HIGH
+        )
+        
+        self.task_manager.add_task(
+            "system_monitor",
+            self._monitor_system_health,
+            TaskPriority.NORMAL
+        )
+
+    def _monitor_system_health(self):
+        """Monitor system health and resources."""
+        while not self._stop_event.is_set():
+            try:
+                # Check core components
+                if not self.task_manager.get_active_tasks():
+                    self.voice.speak("Warning: No active tasks running", ResponseType.ERROR)
+                
+                # Monitor memory usage
+                # Add resource monitoring as needed
+                
+                time.sleep(30)  # Check every 30 seconds
+            except Exception as e:
+                print(f"System monitor error: {e}")
+                time.sleep(5)
+
+    def command_loop(self):
+        """Enhanced command loop with context awareness and interrupt handling."""
+        while not self._stop_event.is_set():
+            try:
+                # Listen for command with enhanced VoiceIO
+                cmd = self.voice.listen(
+                    timeout=6,
+                    phrase_time_limit=6,
+                    prompt="Say a command."
+                )
+                
+                if not cmd:
+                    continue
+
+                # Parse intent with enhanced router
+                intent = self.router.parse_intent(cmd)
+                
+                # Add to conversation history
+                self.state_manager.add_to_history("user", cmd)
+                
+                # Handle intent based on type
+                if intent.type == IntentType.EMERGENCY:
+                    self.voice.speak("Emergency detected!", ResponseType.ERROR)
+                    self.emergency_assistance(reason=cmd)
+                    continue
+                
+                if intent.type == IntentType.MODE_CHANGE:
+                    mode = intent.data.get("mode")
+                    if mode:
+                        # Check if we need to handle interrupts
+                        if self.router.should_interrupt(cmd):
+                            current_tasks = self.state_manager.get_active_tasks()
+                            if current_tasks:
+                                self.voice.speak(
+                                    "I notice you're in the middle of something. "
+                                    "Should I pause that first?",
+                                    ResponseType.CLARIFICATION
+                                )
+                                response = self.voice.listen(timeout=5)
+                                if response and any(word in response.lower() 
+                                                  for word in ["yes", "yeah", "sure"]):
+                                    for task in current_tasks:
+                                        self.task_manager.pause_task(task.name)
+                        
+                        self.change_mode(mode)
+                    continue
+                
+                if intent.type == IntentType.CONTROL:
+                    action = intent.data.get("action")
+                    if action == "pause":
+                        self._handle_pause_request()
+                    elif action == "resume":
+                        self._handle_resume_request()
+                    elif action == "stop":
+                        self._handle_stop_request()
+                    continue
+                
+                if intent.type == IntentType.EMOTIONAL:
+                    self._handle_emotional_response(intent.data.get("emotion"))
+                    continue
+                
+                # Handle other intents
+                if self.router.is_where_am_i(cmd):
+                    self.voice.speak(
+                        "Location services not connected. Please enable GPS.",
+                        ResponseType.ERROR
+                    )
+                    continue
+                
+                if self.router.is_read_command(cmd):
+                    if self.current_mode != "reading":
+                        self.change_mode("reading")
+                    self.voice.speak(
+                        "Reading mode ready. Hold text steady.",
+                        ResponseType.CONFIRMATION
+                    )
+                    continue
+                
+                # Language change commands
+                if any(phrase in cmd for phrase in ["change language", "switch language", "language settings", "change to"]):
+                    self.change_language_interactive()
+                    continue
+                
+                # OCR commands
+                if any(phrase in cmd for phrase in ["check ocr", "ocr status", "text recognition"]):
+                    self.check_ocr_status()
+                    continue
+                
+                if any(phrase in cmd for phrase in ["read text", "read", "ocr"]):
+                    if self.current_mode != "reading":
+                        self.change_mode("reading")
+                    self.speak("Reading mode activated. Point camera at text to read.", blocking=True)
+                    continue
+                
+                # Voice control commands
+                if cmd in self.voice_commands:
+                    self.voice_commands[cmd]()
+                    continue
+                
+                # Assistant queries with context
+                if self.router.is_assistant_query(cmd):
+                    if self.current_mode != "assistant":
+                        self.change_mode("assistant")
+                    
+                    # Get recent context
+                    context = self.state_manager.get_recent_context()
+                    self.assistant_tick(
+                        last_command=cmd,
+                        context=context
+                    )
+                    continue
+                
+                # Object queries with enhanced response
+                with self.lock:
+                    hits = [o for o in self.detected_objects 
+                           if any(w in cmd for w in o["label"].split())]
+                if hits:
+                    msg = ". ".join([f"{o['label']} at {o['pos']}" 
+                                   for o in hits[:3]])
+                    self.voice.speak(msg, ResponseType.CONFIRMATION)
+                else:
+                    self.voice.speak(
+                        "I don't see that yet. Would you like me to "
+                        "notify you when I detect it?",
+                        ResponseType.CLARIFICATION
+                    )
+                    
+            except Exception as e:
+                print(f"Command loop error: {e}")
+                self.voice.speak(
+                    "I encountered an error. Please try again.",
+                    ResponseType.ERROR
+                )
+
+    # Boot flow including language selection and onboarding
+    def _select_language(self):
+        """Handle the language selection process by listening for user's choice."""
+        # For now, assume all languages are available
+        # In the future, this can check for actual model availability
+        available_models = {"en", "hi", "kn"}
+
+        # Play welcome sound
+        if self.audio_manager:
+            self.audio_manager.play('tutorial_start')
+            time.sleep(1)
+        
+        # Initialize TTS in English
+        if self.tts:
+            self.tts.set_lang("en")
+            time.sleep(0.5)
+            self.speak("Welcome to BlindNav Plus Plus!", blocking=True)
+            time.sleep(0.5)
+            self.speak("I will help you select your preferred language.", blocking=True)
+            time.sleep(0.5)
+        
+        # Define available languages and their keywords
+        languages_info = {
+            "en": {
+                "name": "English", 
+                "keywords": ['english', 'inglish', 'ing', 'en', 'one', 'first', 'english language', 'english mode']
+            },
+            "hi": {
+                "name": "Hindi", 
+                "keywords": ['hindi', 'हिंदी', 'हिन्दी', 'hi', 'two', 'second', 'hindi language', 'hindi mode', 'hindee', 'hinde']
+            },
+            "kn": {
+                "name": "Kannada", 
+                "keywords": ['kannada', 'ಕನ್ನಡ', 'kannad', 'kn', 'three', 'third', 'kannada language', 'kannada mode', 'kannad', 'kannad language']
+            }
+        }
+        
+        # List available languages
+        available_languages = []
+        for code, info in languages_info.items():
+            if code in available_models:
+                available_languages.append((code, info))
+        
+        if not available_languages:
+            self.speak("No language models found. Using English as default.", blocking=True)
+            return "en"
+        
+        # Announce available languages
+        self.speak("Available languages are:", blocking=True)
+        for i, (code, info) in enumerate(available_languages, 1):
+            self.speak(f"{i}. {info['name']}", blocking=True)
+            time.sleep(0.3)
+        
+        self.speak("Please say the name of your preferred language, or say the number.", blocking=True)
+        time.sleep(0.5)
+        
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if self.audio_manager:
+                self.audio_manager.play('ready')
+                time.sleep(0.5)
+            
+            # Try to listen for voice input
+            response = self.voice.listen(timeout=10)
+            if response:
+                response = response.lower().strip()
+                
+                # Check for number selection
+                if response in ['1', 'one', 'first']:
+                    return available_languages[0][0]
+                elif response in ['2', 'two', 'second'] and len(available_languages) > 1:
+                    return available_languages[1][0]
+                elif response in ['3', 'three', 'third'] and len(available_languages) > 2:
+                    return available_languages[2][0]
+                
+                # Check for language name selection
+                for code, info in available_languages:
+                    if any(word in response for word in info["keywords"]):
+                        return code
+                
+                # If no valid language detected
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't understand your selection. Please say the language name or number.", blocking=True)
+                    time.sleep(0.5)
+            else:
+                # No response - try fallback to typed input
+                if attempt < max_attempts - 1:
+                    self.speak("I didn't hear anything. Please try again.", blocking=True)
+                    time.sleep(0.5)
+                    # Fallback to typed input for testing
+                    try:
+                        fallback_input = input("(Fallback) Type language choice (1/2/3 or en/hi/kn): ").strip().lower()
+                        if fallback_input in ['1', 'one']:
+                            return available_languages[0][0]
+                        elif fallback_input in ['2', 'two'] and len(available_languages) > 1:
+                            return available_languages[1][0]
+                        elif fallback_input in ['3', 'three'] and len(available_languages) > 2:
+                            return available_languages[2][0]
+                        elif fallback_input in ['en', 'hi', 'kn'] and fallback_input in available_models:
+                            return fallback_input
+                    except:
+                        pass
+        
+        # Default to first available language
+        self.speak("No valid selection detected. Using default language.", blocking=True)
+        return available_languages[0][0]
+
+    def _run_language_selection(self):
+        """Run the language selection process with proper error handling."""
+        try:
+            chosen_lang_code = self._select_language()
+            self.set_language(chosen_lang_code)
+            
+            # Confirm selection in chosen language
+            confirms = {
+                "en": "English selected. Let's begin!",
+                "hi": "हिंदी चुनी गई। चलिए शुरू करें!",
+                "kn": "ಕನ್ನಡ ಆಯ್ಕೆಯಾಗಿದೆ. ಪ್ರಾರಂಭಿಸೋಣ!"
+            }
+            
+            if self.tts:
+                self.speak(confirms.get(chosen_lang_code, confirms["en"]), blocking=True)
+            
+            if self.audio_manager:
+                self.audio_manager.play('success')
+                time.sleep(0.5)
+                
+            return chosen_lang_code
+            
+        except Exception as e:
+            print(f"Error during language selection: {e}")
+            if self.tts:
+                self.tts.set_lang("en")
+                self.speak("An error occurred. Using English as default.", blocking=True)
+            return "en"
+    
+    def run(self, camera_index=0):
+        """Main run loop with complete voice-driven workflow."""
+        try:
+            # Start loading music (play once only, not looping)
+            loading_music = MusicPlayer("loading_music.mp3")
+            loading_music.play_once()
+            loading_music.dim()  # Start with dimmed music
+            time.sleep(1)
+            
+            # Stop music before starting voice workflow
+            loading_music.stop()
+            time.sleep(1)
+
+            # Complete voice-driven startup workflow
+            self._voice_driven_startup()
+            
+            # After voice-driven startup is complete, start camera
+            try:
+                self._open_camera(camera_index=camera_index)
+            except Exception as e:
+                self.speak("Camera not available. Please connect the camera.", blocking=True)
+                self.speak("Camera error occurred. Continuing without camera.", blocking=True)
+                return
+
+            # Start detection and command threads only after setup is complete
+            det_thread = threading.Thread(target=self.detection_loop, daemon=True)
+            cmd_thread = threading.Thread(target=self.command_loop, daemon=True)
+            det_thread.start()
+            cmd_thread.start()
+
+            # main loop
+            try:
+                while det_thread.is_alive() and cmd_thread.is_alive():
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                print("Interrupted by user.")
+        finally:
+            self._stop_event.set()
+            self._close_camera()
+            
+            # Play shutdown sound
+            if hasattr(self, 'audio_manager'):
+                self.audio_manager.play_shutdown()
+                time.sleep(0.5)  # Give time for shutdown sound
+                
+            # Clean up audio systems
+            if hasattr(self, 'tts'):
+                self.tts.stop()
+                
+            print("Navigator stopped.")
+
+# -------------------- Control Panel --------------------
+class NavigatorControlPanel:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("BlindNav++ Control Panel")
+        self.root.geometry("400x300")
+        
+        # Create a container frame
+        self.frame = ttk.Frame(self.root, padding="10")
+        self.frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Create styles for the buttons
+        style = ttk.Style()
+        style.configure("Start.TButton", 
+                       background="green",
+                       foreground="white",
+                       padding=10,
+                       font=("Arial", 14, "bold"))
+        style.configure("Stop.TButton", 
+                       background="red",
+                       foreground="white",
+                       padding=10,
+                       font=("Arial", 14, "bold"))
+        
+        # Create the START button
+        self.start_button = ttk.Button(
+            self.frame,
+            text="START SYSTEM",
+            style="Start.TButton",
+            command=self.start_system
+        )
+        self.start_button.grid(row=0, column=0, padx=10, pady=20)
+        
+        # Create the STOP button
+        self.stop_button = ttk.Button(
+            self.frame,
+            text="STOP SYSTEM",
+            style="Stop.TButton",
+            command=self.stop_system,
+            state="disabled"  # Initially disabled
+        )
+        self.stop_button.grid(row=0, column=1, padx=10, pady=20)
+        
+        # Status label
+        self.status_label = ttk.Label(
+            self.frame,
+            text="System Status: OFF",
+            font=("Arial", 12)
+        )
+        self.status_label.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+        
+        self.navigator = None
+        self.system_running = False
+        
+    def _safe_update_ui(self, func):
+        """Safely execute UI updates with proper error handling."""
+        if not self.root or not self.root.winfo_exists():
+            return
+        try:
+            # Use after_idle to ensure UI updates happen in the main thread
+            self.root.after_idle(lambda: self._execute_ui_update(func))
+        except Exception as e:
+            print(f"UI Update Error: {e}")
+            
+    def _execute_ui_update(self, func):
+        """Execute the UI update function with error handling."""
+        try:
+            func()
+            self.root.update_idletasks()
+        except Exception as e:
+            print(f"UI Update Execution Error: {e}")
+
+    def start_system(self):
+        # Prevent multiple starts
+        if self.system_running or self.navigator:
+            return
+            
+        try:
+            # Disable both buttons during initialization to prevent double-clicks
+            self._safe_update_ui(lambda: [
+                self.start_button.configure(state="disabled"),
+                self.stop_button.configure(state="disabled"),
+                self.status_label.configure(text="System Status: STARTING...")
+            ])
+            
+            # Initialize and start navigator in a separate thread
+            self.navigator = PersonalNavigator(detector_type="yolo", model_path=YOLO_MODEL_PATH)
+            self.nav_thread = threading.Thread(target=self.navigator.run, args=(0,), daemon=True)
+            self.nav_thread.start()
+            
+            self.system_running = True
+            
+            # Update UI to reflect running state
+            self._safe_update_ui(lambda: [
+                self.status_label.configure(text="System Status: RUNNING"),
+                self.stop_button.configure(state="normal")
+            ])
+            
+        except Exception as e:
+            error_msg = f"System startup failed: {str(e)}"
+            print(error_msg)
+            
+            # Reset system state
+            self.system_running = False
+            if hasattr(self, 'navigator') and self.navigator:
+                try:
+                    self.navigator._stop_event.set()
+                except Exception:
+                    pass
+                self.navigator = None
+            
+            # Update UI to reflect error state
+            self._safe_update_ui(lambda: [
+                self.status_label.configure(text=f"Error: {error_msg}"),
+                self.start_button.configure(state="normal"),
+                self.stop_button.configure(state="disabled")
+            ])
+    
+    def stop_system(self):
+        # Prevent multiple stops
+        if not self.system_running or not self.navigator:
+            return
+            
+        try:
+            # Set stopping flag first to prevent race conditions
+            self.system_running = False
+            
+            # Disable both buttons during shutdown
+            self._safe_update_ui(lambda: [
+                self.start_button.configure(state="disabled"),
+                self.stop_button.configure(state="disabled"),
+                self.status_label.configure(text="System Status: SHUTTING DOWN...")
+            ])
+            
+            # Force close any camera connections
+            if hasattr(self.navigator, '_cap') and self.navigator._cap:
+                self.navigator._cap.release()
+            
+            # Set stop event to terminate all threads
+            self.navigator._stop_event.set()
+            
+            # Stop the navigator system with proper farewell
+            if self.navigator:
+                try:
+                    # Say goodbye in current language
+                    farewell_msgs = {
+                        "en": "Thank you for using BlindNav Plus Plus. Shutting down, goodbye!",
+                        "hi": "ब्लाइंडनैव प्लस प्लस का उपयोग करने के लिए धन्यवाद। बंद हो रहा है, अलविदा!",
+                        "kn": "ಬ್ಲೈಂಡ್ನಾವ್ ಪ್ಲಸ್ ಪ್ಲಸ್ ಬಳಸಿದ್ದಕ್ಕೆ ಧನ್ಯವಾದಗಳು. ಶಟ್ ಡೌನ್ ಆಗುತ್ತಿದೆ, ವಿದಾಯ!"
+                    }
+                    farewell = farewell_msgs.get(self.navigator.lang, farewell_msgs["en"])
+                    self.navigator.speak(farewell, blocking=True, message_type="success")
+                    
+                    # Play shutdown sound
+                    if hasattr(self.navigator, 'audio_manager'):
+                        self.navigator.audio_manager.play_shutdown()
+                        time.sleep(1.0)  # Give time for sound and farewell
+                    
+                    # Stop all systems
+                    self.navigator._stop_event.set()
+                    self.navigator._close_camera()
+                    
+                    # Stop audio systems last
+                    if hasattr(self.navigator, 'tts'):
+                        self.navigator.tts.stop()
+                    if hasattr(self.navigator, 'audio_manager'):
+                        self.navigator.audio_manager.stop_all()
+                    
+                    # Clean up thread
+                    if hasattr(self, 'nav_thread') and self.nav_thread.is_alive():
+                        self.nav_thread.join(timeout=2.0)
+                except Exception as e:
+                    print(f"Warning: Navigator cleanup error: {e}")
+                finally:
+                    self.navigator = None
+                    if hasattr(self, 'nav_thread'):
+                        delattr(self, 'nav_thread')
+            
+            # Update UI to reflect stopped state
+            self._safe_update_ui(lambda: [
+                self.status_label.configure(text="System Status: OFF"),
+                self.start_button.configure(state="normal"),
+                self.stop_button.configure(state="disabled")
+            ])
+            
+        except Exception as e:
+            error_msg = f"System shutdown error: {str(e)}"
+            print(error_msg)
+            # Update UI even in case of error
+            self._safe_update_ui(lambda: [
+                self.status_label.configure(text=f"Error during shutdown: {str(e)}"),
+                self.start_button.configure(state="normal"),
+                self.stop_button.configure(state="disabled")
+            ])
+            
+            # Ensure the UI is in a usable state
+            self._safe_update_ui(lambda: [
+                self.status_label.configure(text=f"Error: {error_msg}"),
+                self.start_button.configure(state="normal"),
+                self.stop_button.configure(state="disabled")
+            ])
+            
+            # Force reset system state
+            self.system_running = False
+            self.navigator = None
+    
+    def run(self):
+        try:
+            self.root.mainloop()
+        finally:
+            # Ensure cleanup on window close
+            if self.navigator:
+                self.navigator._stop_event.set()
+
+# -------------------- Entry --------------------
+if __name__ == "__main__":
+    # Direct voice-driven startup (bypass Tkinter control panel)
+    print("Starting BlindNav++ with voice-driven interface...")
+    navigator = PersonalNavigator()
+    navigator.run()
+
+
+BlindNav++ Startup Workflow Phases
+Phase 1: System Initialization
+Load configurations and models with a beep sound
+
+Phase 2: Welcome Greeting
+Play welcome messages introducing the assistant
+
+Phase 3: Language Selection
+Voice-based language choice (English/Hindi/Kannada) with retry logic
+
+Phase 4: User Guidelines
+Speak localized instructions (wake word, commands, safety tips, emergency)
+
+Phase 5: Mode Selection
+Voice-based mode choice (Walking/Navigation/Reading/Object/Assistant)
+Mode-specific setup (e.g., destination for Navigation mode)
+
+Phase 6: Start Operation
+Open camera, launch detection loop thread, launch command loop thread(work respect to the mode selected)
+
+Runtime Loops (Post-Startup):
+Detection Loop - Continuous object detection + mode-specific processing
+Command Loop - intent handling
