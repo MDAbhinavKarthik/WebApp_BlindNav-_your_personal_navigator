@@ -1,0 +1,19 @@
+# BlindNav+ Web Application Requirements
+# Python HTTP Server Dependencies
+
+# For basic local server
+# No additional dependencies needed - uses Python's built-in http.server
+
+# Optional: For enhanced server with CORS support
+flask>=2.3.0
+flask-cors>=4.0.0
+
+# Optional: For production deployment
+gunicorn>=21.0.0
+gevent>=23.0.0
+
+# Optional: For HTTPS support
+pyOpenSSL>=23.0.0
+
+# Development tools
+watchdog>=3.0.0  # For auto-reload during development

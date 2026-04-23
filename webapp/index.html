@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BlindNav+ - Your Personal Navigator</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Error handler to prevent infinite loading -->
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            console.error('Global error:', msg, 'at', url, line);
+            // Force show app even if there's an error
+            setTimeout(function() {
+                var loading = document.getElementById('loading-screen');
+                var app = document.getElementById('app');
+                if (loading && app) {
+                    loading.classList.add('hidden');
+                    app.classList.remove('hidden');
+                }
+            }, 2000);
+            return false;
+        };
+        
+        // Fallback timeout - force show app after 5 seconds
+        setTimeout(function() {
+            var loading = document.getElementById('loading-screen');
+            var app = document.getElementById('app');
+            if (loading && !loading.classList.contains('hidden')) {
+                console.log('[Fallback] Forcing app display after timeout');
+                loading.classList.add('hidden');
+                if (app) app.classList.remove('hidden');
+            }
+        }, 5000);
+    </script>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loader">
+            <div class="pulse-ring"></div>
+            <div class="loader-icon">🔊</div>
+        </div>
+        <h2>BlindNav+</h2>
+        <p>Loading your personal navigator...</p>
+        <div class="loading-progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+        </div>
+        <p class="progress-text" id="loading-status">Initializing...</p>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" class="app hidden">
+        <!-- Header -->
+        <header class="header">
+            <h1>BlindNav+</h1>
+            <div class="status-indicators">
+                <span id="camera-status" class="status-dot" title="Camera Status">📷</span>
+                <span id="mic-status" class="status-dot" title="Microphone Status">🎤</span>
+                <span id="connection-status" class="status-dot" title="Connection Status">📶</span>
+            </div>
+        </header>
+        
+        <!-- Wake Word Status Indicator -->
+        <div id="wake-word-status" class="wake-word-status" aria-live="polite">
+            <span class="wake-word-indicator"></span>
+            <span class="wake-word-text">System Ready</span>
+        </div>
+        
+        <!-- Listening Status Banner -->
+        <div id="listening-banner" class="listening-banner hidden" aria-live="polite">
+            <div class="listening-animation">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </div>
+            <span class="listening-text">🎤 I'm listening... Just speak naturally!</span>
+        </div>
+        
+        <!-- Main Start/Stop Control Button -->
+        <section id="system-control-section" class="section system-control">
+            <button id="system-start-btn" class="system-start-btn" aria-label="Start BlindNav+ System">
+                <span class="start-icon">▶️</span>
+                <span class="start-text">Start BlindNav+</span>
+                <span class="start-subtext">Tap to begin voice assistance</span>
+            </button>
+        </section>
+
+        <!-- ESP32 Connection Setup -->
+        <section id="connection-section" class="section">
+            <h2>Camera Connection</h2>
+            <div class="connection-form">
+                <label for="esp32-ip">ESP32-CAM IP Address:</label>
+                <input type="text" id="esp32-ip" placeholder="192.168.1.100" aria-label="ESP32 IP Address">
+                <div class="btn-group">
+                    <button id="connect-btn" class="btn btn-primary" aria-label="Connect to ESP32 Camera">
+                        Connect ESP32
+                    </button>
+                    <button id="local-camera-btn" class="btn btn-secondary" aria-label="Use device camera">
+                        📷 Use Device Camera
+                    </button>
+                </div>
+            </div>
+            <div id="connection-feedback" class="feedback hidden"></div>
+        </section>
+
+        <!-- Video Feed (Hidden visually but used for processing) -->
+        <div class="video-container">
+            <img id="esp32-stream" crossorigin="anonymous" alt="ESP32 Camera Stream">
+            <video id="local-camera" autoplay playsinline muted style="display:none;"></video>
+            <canvas id="detection-canvas" aria-hidden="true"></canvas>
+            <div id="detection-overlay" class="detection-overlay"></div>
+        </div>
+
+        <!-- Mode Selection -->
+        <section id="mode-section" class="section">
+            <h2>Select Mode</h2>
+            <p class="instruction">Just say the mode name - I'm always listening! Or tap a button.</p>
+            <div class="mode-grid">
+                <button class="mode-btn" data-mode="assistant" aria-label="Assistant Mode">
+                    <span class="mode-icon">🤖</span>
+                    <span class="mode-name">Assistant</span>
+                    <span class="mode-desc">Ask anything</span>
+                </button>
+                <button class="mode-btn" data-mode="navigation" aria-label="Navigation Mode">
+                    <span class="mode-icon">🧭</span>
+                    <span class="mode-name">Navigation</span>
+                    <span class="mode-desc">Real-time guidance</span>
+                </button>
+                <button class="mode-btn" data-mode="object-detection" aria-label="Object Detection Mode">
+                    <span class="mode-icon">🔍</span>
+                    <span class="mode-name">Find Objects</span>
+                    <span class="mode-desc">Locate items</span>
+                </button>
+                <button class="mode-btn" data-mode="walking" aria-label="Walking Mode">
+                    <span class="mode-icon">🚶</span>
+                    <span class="mode-name">Walking</span>
+                    <span class="mode-desc">Step-by-step guide</span>
+                </button>
+                <button class="mode-btn emergency-btn" data-mode="emergency" aria-label="Emergency Mode">
+                    <span class="mode-icon">🚨</span>
+                    <span class="mode-name">Emergency</span>
+                    <span class="mode-desc">Get help fast</span>
+                </button>
+                <button class="mode-btn" data-mode="security" aria-label="Security Mode">
+                    <span class="mode-icon">🛡️</span>
+                    <span class="mode-name">Security</span>
+                    <span class="mode-desc">Monitor area</span>
+                </button>
+                <button class="mode-btn emergency-btn" data-mode="medical" aria-label="Medical Mode">
+                    <span class="mode-icon">🏥</span>
+                    <span class="mode-name">Medical</span>
+                    <span class="mode-desc">Health help</span>
+                </button>
+                <button class="mode-btn emergency-btn" data-mode="fire" aria-label="Fire Mode">
+                    <span class="mode-icon">🔥</span>
+                    <span class="mode-name">Fire</span>
+                    <span class="mode-desc">Fire emergency</span>
+                </button>
+                <button class="mode-btn emergency-btn" data-mode="police" aria-label="Police Mode">
+                    <span class="mode-icon">👮</span>
+                    <span class="mode-name">Police</span>
+                    <span class="mode-desc">Safety help</span>
+                </button>
+                <button class="mode-btn" data-mode="reading" aria-label="Reading Mode">
+                    <span class="mode-icon">📖</span>
+                    <span class="mode-name">Reading</span>
+                    <span class="mode-desc">Read text/signs</span>
+                </button>
+                <button class="mode-btn" data-mode="bus-detection" aria-label="Bus Detection Mode">
+                    <span class="mode-icon">🚌</span>
+                    <span class="mode-name">Bus Detection</span>
+                    <span class="mode-desc">Find your bus</span>
+                </button>
+                <button class="mode-btn" data-mode="traffic-analysis" aria-label="Traffic Analysis Mode">
+                    <span class="mode-icon">🚦</span>
+                    <span class="mode-name">Traffic Analysis</span>
+                    <span class="mode-desc">Safe crossing help</span>
+                </button>
+                <button class="mode-btn" data-mode="environment-analysis" aria-label="Environment Analysis Mode">
+                    <span class="mode-icon">🌤️</span>
+                    <span class="mode-name">Weather</span>
+                    <span class="mode-desc">Cloud & rain check</span>
+                </button>
+                <button class="mode-btn" data-mode="scene-describe" aria-label="Scene Description Mode">
+                    <span class="mode-icon">👁️</span>
+                    <span class="mode-name">Describe Scene</span>
+                    <span class="mode-desc">What's around you</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Active Mode Display -->
+        <section id="active-mode-section" class="section hidden">
+            <div class="active-mode-header">
+                <h2 id="active-mode-title">Mode Active</h2>
+                <button id="stop-mode-btn" class="btn btn-danger" aria-label="Stop current mode">
+                    Stop Mode
+                </button>
+            </div>
+            <div id="mode-content" class="mode-content">
+                <!-- Dynamic content based on active mode -->
+            </div>
+            <div id="detection-results" class="detection-results"></div>
+        </section>
+
+        <!-- Voice Control Button -->
+        <div class="voice-control">
+            <button id="voice-btn" class="voice-btn listening" aria-label="Voice command - Always listening">
+                <span class="voice-icon">🎤</span>
+                <span class="voice-status">Always listening</span>
+            </button>
+        </div>
+
+        <!-- Audio Feedback Area -->
+        <div id="audio-feedback" class="audio-feedback" aria-live="polite" aria-atomic="true">
+            <p id="last-spoken"></p>
+        </div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="settings-panel hidden">
+            <h2>Settings</h2>
+            <div class="setting-item">
+                <label for="speech-rate">Speech Rate</label>
+                <input type="range" id="speech-rate" min="0.5" max="2" step="0.1" value="1">
+            </div>
+            <div class="setting-item">
+                <label for="speech-volume">Volume</label>
+                <input type="range" id="speech-volume" min="0" max="1" step="0.1" value="1">
+            </div>
+            <div class="setting-item">
+                <label for="detection-sensitivity">Detection Sensitivity</label>
+                <input type="range" id="detection-sensitivity" min="0.3" max="0.9" step="0.1" value="0.5">
+            </div>
+            <div class="setting-item">
+                <label for="language-select">Language</label>
+                <select id="language-select">
+                    <option value="en-US">English (US)</option>
+                    <option value="en-GB">English (UK)</option>
+                    <option value="hi-IN">Hindi</option>
+                    <option value="es-ES">Spanish</option>
+                </select>
+            </div>
+            <button id="close-settings" class="btn">Close</button>
+        </div>
+
+        <!-- Settings Toggle -->
+        <button id="settings-toggle" class="settings-toggle" aria-label="Open Settings">
+            ⚙️
+        </button>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    
+    <!-- Core Modules -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/knowledge-base.js"></script>
+    <script src="js/bus-routes.js"></script>
+    <script src="js/speech.js?v=2"></script>
+    <script src="js/camera.js?v=2"></script>
+    <script src="js/detection.js?v=2"></script>
+    <script src="js/navigation-service.js"></script>
+    <script src="js/vision-detection-service.js?v=2"></script>
+    <script src="js/enhanced-detection-config.js"></script>
+    <script src="js/navigation-safety-analyzer.js"></script>
+    <script src="js/ocr-service.js"></script>
+    <script src="js/indoor-navigation-helpers.js"></script>
+    
+    <!-- Mode Modules -->
+    <script src="js/modes/navigation.js?v=2"></script>
+    <script src="js/modes/object-detection.js"></script>
+    <script src="js/modes/bus-detection.js"></script>
+    <script src="js/modes/traffic-analysis.js"></script>
+    <script src="js/modes/environment-analysis.js"></script>
+    <script src="js/modes/scene-describe.js"></script>
+    <script src="js/modes/assistant.js?v=2"></script>
+    <script src="js/modes/emergency.js"></script>
+    <script src="js/modes/walking.js?v=2"></script>
+    <script src="js/modes/security.js"></script>
+    <script src="js/modes/medical.js"></script>
+    <script src="js/modes/fire.js"></script>
+    <script src="js/modes/police.js"></script>
+    <script src="js/modes/reading.js"></script>
+    
+    <!-- Voice Instructions System -->
+    <script src="js/voice-instructions.js"></script>
+    
+    <!-- Wake Word & Conversation Flow System -->
+    <script src="js/wake-word-detection.js"></script>
+    <script src="js/conversation-flow-manager.js"></script>
+    <script src="js/ui-fallback-system.js"></script>
+    <script src="js/voice-ui-hybrid-controller.js"></script>
+    
+    <!-- System Boot Flow (mirrors Python backend) -->
+    <script src="js/system-boot.js?v=2"></script>
+    
+    <!-- Main App -->
+    <script src="js/app.js?v=3"></script>
+    
+    <!-- Global Button Handlers (backup for onclick) -->
+    <script>
+        // Global function for Start BlindNav+ button
+        window.startBlindNav = async function() {
+            console.log('[Global] Start BlindNav clicked');
+            
+            // Call the app's start function (it handles all speech)
+            if (window.blindNavApp && typeof window.blindNavApp.startSystem === 'function') {
+                await window.blindNavApp.startSystem();
+            } else {
+                console.error('[Global] blindNavApp not found or startSystem not available');
+                alert('App not initialized. Please refresh the page.');
+            }
+        };
+        
+        // Global function for Use Local Camera button
+        window.useLocalCamera = async function() {
+            console.log('[Global] Use Local Camera clicked');
+            
+            if (window.blindNavApp && typeof window.blindNavApp.connectLocalCamera === 'function') {
+                await window.blindNavApp.connectLocalCamera();
+            } else if (typeof cameraManager !== 'undefined') {
+                // Direct camera manager fallback
+                const result = await cameraManager.connectLocal();
+                if (result) {
+                    alert('Camera connected successfully!');
+                } else {
+                    alert('Failed to connect camera. Please check permissions.');
+                }
+            } else {
+                console.error('[Global] Camera manager not available');
+                alert('Camera system not available. Please refresh the page.');
+            }
+        };
+        
+        // Simple speech test function for debugging
+        window.testSpeech = function() {
+            console.log('[Test] Running speech test...');
+            const synth = window.speechSynthesis;
+            
+            console.log('[Test] Voices available:', synth.getVoices().length);
+            console.log('[Test] Speaking:', synth.speaking);
+            console.log('[Test] Pending:', synth.pending);
+            console.log('[Test] Paused:', synth.paused);
+            
+            synth.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance('Hello, this is a test of the speech system.');
+            utterance.volume = 1.0;
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            
+            utterance.onstart = () => console.log('[Test] Speech STARTED');
+            utterance.onend = () => console.log('[Test] Speech ENDED');
+            utterance.onerror = (e) => console.error('[Test] Speech ERROR:', e.error);
+            
+            synth.speak(utterance);
+            console.log('[Test] Utterance queued');
+        };
+        
+        console.log('[Global] Button handlers registered. Type testSpeech() in console to test speech.');
+    </script>
+    
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('[SW] Registered:', reg.scope))
+                    .catch(err => console.log('[SW] Registration failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>

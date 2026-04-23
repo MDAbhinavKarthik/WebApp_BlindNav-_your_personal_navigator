@@ -1,0 +1,207 @@
+{
+  "routes": {
+    "500": {
+      "number": "500",
+      "name": "Kempegowda Bus Station - Banashankari",
+      "route": "Majestic to Banashankari",
+      "stops": ["Majestic", "City Market", "Lalbagh", "Jayanagar 4th Block", "Jayanagar 9th Block", "Banashankari"],
+      "frequency": "Every 10 minutes",
+      "operating_hours": "5:00 AM - 11:30 PM",
+      "destinations": ["Majestic", "Banashankari", "Jayanagar", "Lalbagh", "City Market"]
+    },
+    "500A": {
+      "number": "500A",
+      "name": "Majestic - Banashankari via DVG Road",
+      "route": "Majestic to Banashankari via DVG Road",
+      "stops": ["Majestic", "KR Market", "DVG Road", "Basavanagudi", "Banashankari"],
+      "frequency": "Every 15 minutes",
+      "operating_hours": "5:30 AM - 11:00 PM",
+      "destinations": ["Majestic", "Banashankari", "Basavanagudi", "DVG Road"]
+    },
+    "500C": {
+      "number": "500C",
+      "name": "Banashankari - Electronic City",
+      "route": "Banashankari to Electronic City",
+      "stops": ["Banashankari", "BTM Layout", "Silk Board", "HSR Layout", "Electronic City"],
+      "frequency": "Every 12 minutes",
+      "operating_hours": "6:00 AM - 10:30 PM",
+      "destinations": ["Banashankari", "BTM Layout", "Electronic City", "HSR Layout", "Silk Board"]
+    },
+    "500D": {
+      "number": "500D",
+      "name": "Majestic - Kengeri",
+      "route": "Majestic to Kengeri via Banashankari",
+      "stops": ["Majestic", "Vijayanagar", "RR Nagar", "Kengeri Satellite Town", "Kengeri"],
+      "frequency": "Every 20 minutes",
+      "operating_hours": "5:00 AM - 10:00 PM",
+      "destinations": ["Majestic", "Vijayanagar", "RR Nagar", "Kengeri"]
+    },
+    "201": {
+      "number": "201",
+      "name": "Shivajinagar - Whitefield",
+      "route": "Shivajinagar to Whitefield",
+      "stops": ["Shivajinagar", "MG Road", "Indiranagar", "KR Puram", "Whitefield"],
+      "frequency": "Every 15 minutes",
+      "operating_hours": "5:30 AM - 11:00 PM",
+      "destinations": ["Shivajinagar", "MG Road", "Indiranagar", "Whitefield", "KR Puram"]
+    },
+    "335E": {
+      "number": "335E",
+      "name": "Kempegowda Bus Station - ITPL",
+      "route": "Majestic to ITPL",
+      "stops": ["Majestic", "Shivajinagar", "Old Airport Road", "Marathahalli", "ITPL"],
+      "frequency": "Every 12 minutes",
+      "operating_hours": "6:00 AM - 11:00 PM",
+      "destinations": ["Majestic", "ITPL", "Marathahalli", "Shivajinagar"]
+    },
+    "365": {
+      "number": "365",
+      "name": "Majestic - Electronic City",
+      "route": "Majestic to Electronic City via Koramangala",
+      "stops": ["Majestic", "Lalbagh", "BTM Layout", "Koramangala", "Silk Board", "Electronic City"],
+      "frequency": "Every 10 minutes",
+      "operating_hours": "5:00 AM - 11:30 PM",
+      "destinations": ["Majestic", "Electronic City", "Koramangala", "BTM Layout", "Silk Board"]
+    },
+    "411": {
+      "number": "411",
+      "name": "Majestic - Yelahanka",
+      "route": "Majestic to Yelahanka via Hebbal",
+      "stops": ["Majestic", "Mekhri Circle", "Hebbal", "Jakkur", "Yelahanka"],
+      "frequency": "Every 15 minutes",
+      "operating_hours": "5:30 AM - 10:30 PM",
+      "destinations": ["Majestic", "Yelahanka", "Hebbal", "Jakkur"]
+    },
+    "210": {
+      "number": "210",
+      "name": "Shivajinagar - Bannerghatta",
+      "route": "Shivajinagar to Bannerghatta via Jayanagar",
+      "stops": ["Shivajinagar", "Corporation", "Jayanagar", "JP Nagar", "Bannerghatta"],
+      "frequency": "Every 20 minutes",
+      "operating_hours": "6:00 AM - 9:30 PM",
+      "destinations": ["Shivajinagar", "Bannerghatta", "JP Nagar", "Jayanagar"]
+    },
+    "252": {
+      "number": "252",
+      "name": "Majestic - Sarjapur",
+      "route": "Majestic to Sarjapur Road",
+      "stops": ["Majestic", "Shantinagar", "Koramangala", "HSR Layout", "Sarjapur"],
+      "frequency": "Every 18 minutes",
+      "operating_hours": "6:00 AM - 10:00 PM",
+      "destinations": ["Majestic", "Sarjapur", "Koramangala", "HSR Layout"]
+    },
+    "270": {
+      "number": "270",
+      "name": "Majestic - Marathahalli",
+      "route": "Majestic to Marathahalli via Old Airport Road",
+      "stops": ["Majestic", "Trinity Circle", "Old Airport Road", "Domlur", "Marathahalli"],
+      "frequency": "Every 12 minutes",
+      "operating_hours": "5:30 AM - 11:00 PM",
+      "destinations": ["Majestic", "Marathahalli", "Domlur", "Old Airport Road"]
+    },
+    "KIA-5": {
+      "number": "KIA-5",
+      "name": "Electronic City - Airport",
+      "route": "Electronic City to Kempegowda Airport",
+      "stops": ["Electronic City", "Silk Board", "Hebbal", "Airport"],
+      "frequency": "Every 30 minutes",
+      "operating_hours": "24/7",
+      "destinations": ["Electronic City", "Airport", "Hebbal", "Kempegowda Airport"]
+    },
+    "KIA-7": {
+      "number": "KIA-7",
+      "name": "Banashankari - Airport",
+      "route": "Banashankari to Kempegowda Airport",
+      "stops": ["Banashankari", "Jayanagar", "Majestic", "Hebbal", "Airport"],
+      "frequency": "Every 45 minutes",
+      "operating_hours": "4:00 AM - 12:00 AM",
+      "destinations": ["Banashankari", "Airport", "Majestic", "Kempegowda Airport"]
+    },
+    "KIA-8": {
+      "number": "KIA-8",
+      "name": "Whitefield - Airport",
+      "route": "Whitefield to Kempegowda Airport",
+      "stops": ["Whitefield", "KR Puram", "Hebbal", "Airport"],
+      "frequency": "Every 40 minutes",
+      "operating_hours": "4:30 AM - 11:30 PM",
+      "destinations": ["Whitefield", "Airport", "KR Puram", "Kempegowda Airport"]
+    },
+    "500K": {
+      "number": "500K",
+      "name": "Kengeri - Majestic",
+      "route": "Kengeri to Majestic via Mysore Road",
+      "stops": ["Kengeri", "RR Nagar", "Mysore Road", "Nayandahalli", "Majestic"],
+      "frequency": "Every 15 minutes",
+      "operating_hours": "5:00 AM - 11:00 PM",
+      "destinations": ["Kengeri", "Majestic", "RR Nagar", "Mysore Road"]
+    },
+    "401": {
+      "number": "401",
+      "name": "Majestic - Nagawara",
+      "route": "Majestic to Nagawara via Hebbal",
+      "stops": ["Majestic", "Hebbal", "Kempapura", "Nagawara"],
+      "frequency": "Every 20 minutes",
+      "operating_hours": "6:00 AM - 10:00 PM",
+      "destinations": ["Majestic", "Nagawara", "Hebbal", "Kempapura"]
+    }
+  },
+  "bus_stops": {
+    "majestic": {
+      "name": "Kempegowda Bus Station (Majestic)",
+      "latitude": 12.9778,
+      "longitude": 77.5716,
+      "buses": ["500", "500A", "500D", "201", "335E", "365", "411", "252", "270", "KIA-7", "500K", "401"]
+    },
+    "banashankari": {
+      "name": "Banashankari Bus Station",
+      "latitude": 12.9255,
+      "longitude": 77.5468,
+      "buses": ["500", "500A", "500C", "210", "KIA-7"]
+    },
+    "electronic_city": {
+      "name": "Electronic City Bus Stop",
+      "latitude": 12.8399,
+      "longitude": 77.6770,
+      "buses": ["500C", "365", "KIA-5"]
+    },
+    "whitefield": {
+      "name": "Whitefield Bus Station",
+      "latitude": 12.9698,
+      "longitude": 77.7500,
+      "buses": ["201", "KIA-8"]
+    },
+    "jayanagar": {
+      "name": "Jayanagar 4th Block",
+      "latitude": 12.9308,
+      "longitude": 77.5838,
+      "buses": ["500", "210", "KIA-7"]
+    },
+    "koramangala": {
+      "name": "Koramangala Bus Stop",
+      "latitude": 12.9279,
+      "longitude": 77.6271,
+      "buses": ["365", "252"]
+    },
+    "hebbal": {
+      "name": "Hebbal Bus Stop",
+      "latitude": 13.0358,
+      "longitude": 77.5970,
+      "buses": ["411", "KIA-5", "KIA-7", "KIA-8", "401"]
+    },
+    "marathahalli": {
+      "name": "Marathahalli Bridge",
+      "latitude": 12.9591,
+      "longitude": 77.6974,
+      "buses": ["335E", "270"]
+    },
+    "airport": {
+      "name": "Kempegowda International Airport",
+      "latitude": 13.1989,
+      "longitude": 77.7069,
+      "buses": ["KIA-5", "KIA-7", "KIA-8"]
+    }
+  },
+  "default_message": "Bus route information not available in database. Please check BMTC website or ask at the bus stop."
+}
+
+
